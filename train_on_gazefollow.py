@@ -1,3 +1,4 @@
+from numpy.lib.type_check import imag
 import torch
 from torchvision import transforms
 import torch.nn as nn
@@ -82,8 +83,12 @@ def train():
         pretrained_dict = pretrained_dict['model']
         model_dict.update(pretrained_dict)
         model.load_state_dict(model_dict)
+    # print("="*50)
+    # print(model)
+    # print("="*50)
 
     # Loss functions
+    # MSE(https://blog.csdn.net/hao5335156/article/details/81029791)
     mse_loss = nn.MSELoss(reduce=False) # not reducing in order to ignore outside cases
     bcelogit_loss = nn.BCEWithLogitsLoss()
 
@@ -97,20 +102,28 @@ def train():
 
     print("Training in progress ...")
     for ep in range(args.epochs):
+        # idx, (img, face, head_channel, gaze_heatmap, path, gaze_inside)
+        # img -> whole image(Scene Image), face -> head image(Cropped Head), head_channel -> position image(Head Position)
+            # img.shape -> (N, 3, 224, 224),
+            # face.shape -> (N, 3, 224, 224)
+            # head_channel.shape -> (N, 1, 224, 224)
+            # gaze_heatmap -> (N, 64, 64)
         for batch, (img, face, head_channel, gaze_heatmap, name, gaze_inside) in enumerate(train_loader):
-            model.train(True)
+            model.train(True) # https://stackoverflow.com/questions/51433378/what-does-model-train-do-in-pytorch
             images = img.cuda().to(device)
             head = head_channel.cuda().to(device)
             faces = face.cuda().to(device)
             gaze_heatmap = gaze_heatmap.cuda().to(device)
+
+            # predict heatmap(N, 1, 64, 64), mean of attention, in/out
             gaze_heatmap_pred, attmap, inout_pred = model(images, head, faces)
             gaze_heatmap_pred = gaze_heatmap_pred.squeeze(1)
 
             # Loss
                 # l2 loss computed only for inside case
-            l2_loss = mse_loss(gaze_heatmap_pred, gaze_heatmap)*loss_amp_factor
-            l2_loss = torch.mean(l2_loss, dim=1)
-            l2_loss = torch.mean(l2_loss, dim=1)
+            l2_loss = mse_loss(gaze_heatmap_pred, gaze_heatmap)*loss_amp_factor # (N, 64, 64)
+            l2_loss = torch.mean(l2_loss, dim=1) # (N, 64)
+            l2_loss = torch.mean(l2_loss, dim=1) # (N)
             gaze_inside = gaze_inside.cuda(device).to(torch.float)
             l2_loss = torch.mul(l2_loss, gaze_inside) # zero out loss when it's out-of-frame gaze case
             l2_loss = torch.sum(l2_loss)/torch.sum(gaze_inside)
@@ -138,26 +151,34 @@ def train():
                 model.train(False)
                 AUC = []; min_dist = []; avg_dist = []
                 with torch.no_grad():
+                    # idx, (img, face, head_channel, gaze_heatmap, cont_gaze, imsize, path)
+                        # img.shape -> (N, 3, 224, 224),
+                        # face.shape -> (N, 3, 224, 224)
+                        # head_channel.shape -> (N, 1, 224, 224)
+                        # gaze_heatmap -> (N, 64, 64)
+                        # cont_gaze -> (N, 20, 2)
                     for val_batch, (val_img, val_face, val_head_channel, val_gaze_heatmap, cont_gaze, imsize, _) in enumerate(val_loader):
                         val_images = val_img.cuda().to(device)
                         val_head = val_head_channel.cuda().to(device)
                         val_faces = val_face.cuda().to(device)
                         val_gaze_heatmap = val_gaze_heatmap.cuda().to(device)
+
+                        # predict heatmap(N, 1, 64, 64), mean of attention, in/out
                         val_gaze_heatmap_pred, val_attmap, val_inout_pred = model(val_images, val_head, val_faces)
-                        val_gaze_heatmap_pred = val_gaze_heatmap_pred.squeeze(1)
+                        val_gaze_heatmap_pred = val_gaze_heatmap_pred.squeeze(1) # (N, 1, 64, 64) -> (N, 64, 64)
 
                         # go through each data point and record AUC, min dist, avg dist
                         for b_i in range(len(cont_gaze)):
                             # remove padding and recover valid ground truth points
                             valid_gaze = cont_gaze[b_i]
-                            valid_gaze = valid_gaze[valid_gaze != -1].view(-1,2)
+                            valid_gaze = valid_gaze[valid_gaze != -1].view(-1,2) # (20, 2) -> ('<20', 2) get rid of dummy gaze
                             # AUC: area under curve of ROC
-                            multi_hot = imutils.multi_hot_targets(cont_gaze[b_i], imsize[b_i])
+                            multi_hot = imutils.multi_hot_targets(cont_gaze[b_i], imsize[b_i]) # get white image with black gaze dot
                             scaled_heatmap = imresize(val_gaze_heatmap_pred[b_i], (imsize[b_i][1], imsize[b_i][0]), interp = 'bilinear')
                             auc_score = evaluation.auc(scaled_heatmap, multi_hot)
                             AUC.append(auc_score)
                             # min distance: minimum among all possible pairs of <ground truth point, predicted point>
-                            pred_x, pred_y = evaluation.argmax_pts(val_gaze_heatmap_pred[b_i])
+                            pred_x, pred_y = evaluation.argmax_pts(val_gaze_heatmap_pred[b_i]) # return index of max heatmap value
                             norm_p = [pred_x/float(output_resolution), pred_y/float(output_resolution)]
                             all_distances = []
                             for gt_gaze in valid_gaze:

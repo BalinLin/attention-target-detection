@@ -9,7 +9,7 @@ def unnorm(img, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):
     mean = np.array(mean).reshape(3,1,1)
     return img * std + mean
 
-
+# get head position
 def get_head_box_channel(x_min, y_min, x_max, y_max, width, height, resolution, coordconv=False):
     head_box = np.array([x_min/width, y_min/height, x_max/width, y_max/height])*resolution
     head_box = head_box.astype(int)
@@ -18,7 +18,7 @@ def get_head_box_channel(x_min, y_min, x_max, y_max, width, height, resolution, 
         unit = np.array(range(0,resolution), dtype=np.float32)
         head_channel = []
         for i in unit:
-            head_channel.append([unit+i])
+            head_channel.append([unit+i]) # [0-223], [1-224] .... [223-446]
         head_channel = np.squeeze(np.array(head_channel)) / float(np.max(head_channel))
         head_channel[head_box[1]:head_box[3],head_box[0]:head_box[2]] = 0
     else:
@@ -60,7 +60,10 @@ def draw_labelmap(img, pt, sigma, type='Gaussian'):
     img_y = max(0, ul[1]), min(br[1], img.shape[0])
 
     img[img_y[0]:img_y[1], img_x[0]:img_x[1]] += g[g_y[0]:g_y[1], g_x[0]:g_x[1]]
-    img = img/np.max(img) # normalize heatmap so it has max value of 1
+
+    # normalize heatmap so it has max value of 1
+    img = img/np.max(img)
+
     return to_torch(img)
 
 

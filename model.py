@@ -7,6 +7,7 @@ from lib.pytorch_convolutional_rnn import convolutional_rnn
 import numpy as np
 
 
+# https://pytorch.org/docs/stable/generated/torch.nn.Conv2d.html
 class Bottleneck(nn.Module):
     expansion = 4
 
@@ -17,10 +18,10 @@ class Bottleneck(nn.Module):
         self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=stride,
                                padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(planes)
-        self.conv3 = nn.Conv2d(planes, planes * 4, kernel_size=1, bias=False)
-        self.bn3 = nn.BatchNorm2d(planes * 4)
+        self.conv3 = nn.Conv2d(planes, planes * self.expansion, kernel_size=1, bias=False)
+        self.bn3 = nn.BatchNorm2d(planes * self.expansion)
         self.relu = nn.ReLU(inplace=True)
-        self.downsample = downsample
+        self.downsample = downsample # shortcut
         self.stride = stride
 
     def forward(self, x):
@@ -37,6 +38,7 @@ class Bottleneck(nn.Module):
         out = self.conv3(out)
         out = self.bn3(out)
 
+        # shortcut
         if self.downsample is not None:
             residual = self.downsample(x)
 
@@ -56,10 +58,10 @@ class BottleneckConvLSTM(nn.Module):
         self.conv2 = nn.Conv2d(planes, planes, kernel_size=3, stride=stride,
                                padding=1, bias=False)
         self.bn2 = nn.BatchNorm2d(planes)
-        self.conv3 = nn.Conv2d(planes, planes * 4, kernel_size=1, bias=False)
-        self.bn3 = nn.BatchNorm2d(planes * 4)
+        self.conv3 = nn.Conv2d(planes, planes * self.expansion, kernel_size=1, bias=False)
+        self.bn3 = nn.BatchNorm2d(planes * self.expansion)
         self.relu = nn.ReLU(inplace=True)
-        self.downsample = downsample
+        self.downsample = downsample # shortcut
         self.bn_ds = nn.BatchNorm2d(planes * self.expansion)
 
         self.stride = stride
@@ -84,6 +86,7 @@ class BottleneckConvLSTM(nn.Module):
         if out.shape[0] > 1:
             out = self.bn3(out)
 
+        # shortcut
         if self.downsample is not None:
             # RW edit: handles batch_size==1
             if out.shape[0] > 1:
@@ -98,7 +101,7 @@ class BottleneckConvLSTM(nn.Module):
 
 
 class ModelSpatial(nn.Module):
-    # Define a ResNet 50-ish arch
+    # Define a ResNet 50-ish arch [3, 4, 6, 3]
     def __init__(self, block = Bottleneck, layers_scene = [3, 4, 6, 3, 2], layers_face = [3, 4, 6, 3, 2]):
         # Resnet Feature Extractor
         self.inplanes_scene = 64
@@ -109,7 +112,7 @@ class ModelSpatial(nn.Module):
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
         self.avgpool = nn.AvgPool2d(7, stride=1)
 
-        # scene pathway
+        # scene pathway, input size = 4 means Scene Image cat with Head Position
         self.conv1_scene = nn.Conv2d(4, 64, kernel_size=7, stride=2, padding=3, bias=False)
         self.bn1_scene = nn.BatchNorm2d(64)
         self.layer1_scene = self._make_layer_scene(block, 64, layers_scene[0])
@@ -163,7 +166,7 @@ class ModelSpatial(nn.Module):
 
     def _make_layer_scene(self, block, planes, blocks, stride=1):
         downsample = None
-        if stride != 1 or self.inplanes_scene != planes * block.expansion:
+        if stride != 1 or self.inplanes_scene != planes * block.expansion: # if residual size is bigger than output
             downsample = nn.Sequential(
                 nn.Conv2d(self.inplanes_scene, planes * block.expansion,
                           kernel_size=1, stride=stride, bias=False),
@@ -180,7 +183,7 @@ class ModelSpatial(nn.Module):
 
     def _make_layer_face(self, block, planes, blocks, stride=1):
         downsample = None
-        if stride != 1 or self.inplanes_face != planes * block.expansion:
+        if stride != 1 or self.inplanes_face != planes * block.expansion: # if residual size is bigger than output
             downsample = nn.Sequential(
                 nn.Conv2d(self.inplanes_face, planes * block.expansion,
                           kernel_size=1, stride=stride, bias=False),
@@ -197,70 +200,83 @@ class ModelSpatial(nn.Module):
 
 
     def forward(self, images, head, face):
-        face = self.conv1_face(face)
+        ### images -> whole image(Scene Image), head -> position image(Head Position), face -> head image(Cropped Head)
+        # images.shape -> torch.Size([batch_size, 3, 224, 224]),
+        # face.shape -> torch.Size([batch_size, 3, 224, 224])
+        # head.shape -> torch.Size([batch_size, 1, 224, 224])
+        face = self.conv1_face(face)       # (N, 3, 224, 224) -> (N, 64, 112, 112)
         face = self.bn1_face(face)
         face = self.relu(face)
-        face = self.maxpool(face)
-        face = self.layer1_face(face)
-        face = self.layer2_face(face)
-        face = self.layer3_face(face)
-        face = self.layer4_face(face)
-        face_feat = self.layer5_face(face)
+        face = self.maxpool(face)          # (N, 64, 112, 112) -> (N, 64, 56, 56)
+        face = self.layer1_face(face)      # (N, 64, 56, 56)   -> (N, 256, 56, 56)
+        face = self.layer2_face(face)      # (N, 256, 56, 56)  -> (N, 512, 28, 28)
+        face = self.layer3_face(face)      # (N, 512, 28, 28)  -> (N, 1024, 14, 14)
+        face = self.layer4_face(face)      # (N, 1024, 14, 14) -> (N, 2048, 7, 7)
+        face_feat = self.layer5_face(face) # (N, 2048, 7, 7)   -> (N, 1024, 7, 7)
 
         # reduce head channel size by max pooling: (N, 1, 224, 224) -> (N, 1, 28, 28)
         head_reduced = self.maxpool(self.maxpool(self.maxpool(head))).view(-1, 784)
+
         # reduce face feature size by avg pooling: (N, 1024, 7, 7) -> (N, 1024, 1, 1)
         face_feat_reduced = self.avgpool(face_feat).view(-1, 1024)
-        # get and reshape attention weights such that it can be multiplied with scene feature map
-        attn_weights = self.attn(torch.cat((head_reduced, face_feat_reduced), 1))
-        attn_weights = attn_weights.view(-1, 1, 49)
-        attn_weights = F.softmax(attn_weights, dim=2) # soft attention weights single-channel
-        attn_weights = attn_weights.view(-1, 1, 7, 7)
 
+        # get and reshape attention weights such that it can be multiplied with scene feature map
+        attn_weights = self.attn(torch.cat((head_reduced, face_feat_reduced), 1)) # (N, 1808)
+        attn_weights = attn_weights.view(-1, 1, 49) # (N, 1, 49)
+        attn_weights = F.softmax(attn_weights, dim=2) # soft attention weights single-channel, value of attention(dim=2) to be [0-1]
+        attn_weights = attn_weights.view(-1, 1, 7, 7) # (N, 1, 7, 7)
+
+        # origin image concat with haed position (N, 3, 224, 224) + (N, 1, 224, 224) -> (N, 4, 224, 224)
         im = torch.cat((images, head), dim=1)
-        im = self.conv1_scene(im)
+        im = self.conv1_scene(im)           # (N, 4, 224, 224) -> (N, 64, 112, 112)
         im = self.bn1_scene(im)
         im = self.relu(im)
-        im = self.maxpool(im)
-        im = self.layer1_scene(im)
-        im = self.layer2_scene(im)
-        im = self.layer3_scene(im)
-        im = self.layer4_scene(im)
-        scene_feat = self.layer5_scene(im)
-        # attn_weights = torch.ones(attn_weights.shape)/49.0
-        attn_applied_scene_feat = torch.mul(attn_weights, scene_feat) # (N, 1, 7, 7) # applying attention weights on scene feat
+        im = self.maxpool(im)               # (N, 64, 112, 112) -> (N, 64, 56, 56)
+        im = self.layer1_scene(im)          # (N, 64, 56, 56)   -> (N, 256, 56, 56)
+        im = self.layer2_scene(im)          # (N, 256, 56, 56)  -> (N, 512, 28, 28)
+        im = self.layer3_scene(im)          # (N, 512, 28, 28)  -> (N, 1024, 14, 14)
+        im = self.layer4_scene(im)          # (N, 1024, 14, 14) -> (N, 2048, 7, 7)
+        scene_feat = self.layer5_scene(im)  # (N, 2048, 7, 7)   -> (N, 1024, 7, 7)
 
-        scene_face_feat = torch.cat((attn_applied_scene_feat, face_feat), 1)
+        # applying attention weights on scene feat
+        # attn_weights = torch.ones(attn_weights.shape)/49.0
+        attn_applied_scene_feat = torch.mul(attn_weights, scene_feat) # (N, 1, 7, 7) * (N, 1024, 7, 7) -> (N, 1024, 7, 7)
+
+        # attention feature concat with face feature
+        scene_face_feat = torch.cat((attn_applied_scene_feat, face_feat), 1) #  (N, 1024, 7, 7) + (N, 1024, 7, 7) -> (N, 2048, 7, 7)
 
         # scene + face feat -> in/out
-        encoding_inout = self.compress_conv1_inout(scene_face_feat)
+        encoding_inout = self.compress_conv1_inout(scene_face_feat) # (N, 2048, 7, 7) -> (N, 512, 7, 7)
         encoding_inout = self.compress_bn1_inout(encoding_inout)
         encoding_inout = self.relu(encoding_inout)
-        encoding_inout = self.compress_conv2_inout(encoding_inout)
+        encoding_inout = self.compress_conv2_inout(encoding_inout) # (N, 512, 7, 7) -> (N, 1, 7, 7)
         encoding_inout = self.compress_bn2_inout(encoding_inout)
         encoding_inout = self.relu(encoding_inout)
-        encoding_inout = encoding_inout.view(-1, 49)
-        encoding_inout = self.fc_inout(encoding_inout)
+        encoding_inout = encoding_inout.view(-1, 49) # (N, 1, 7, 7) -> (N, 49)
+        encoding_inout = self.fc_inout(encoding_inout) # (N, 49) -> (N, 1)
 
         # scene + face feat -> encoding -> decoding
-        encoding = self.compress_conv1(scene_face_feat)
+        encoding = self.compress_conv1(scene_face_feat) # (N, 2048, 7, 7) -> (N, 1024, 7, 7)
         encoding = self.compress_bn1(encoding)
         encoding = self.relu(encoding)
-        encoding = self.compress_conv2(encoding)
+        encoding = self.compress_conv2(encoding) # (N, 1024, 7, 7) -> (N, 512, 7, 7)
         encoding = self.compress_bn2(encoding)
         encoding = self.relu(encoding)
 
-        x = self.deconv1(encoding)
+        # https://pytorch.org/docs/stable/generated/torch.nn.ConvTranspose2d.html
+        # Hout​=(Hin​−1)×stride[0]−2×padding[0]+dilation[0]×(kernel_size[0]−1)+output_padding[0]+1
+        x = self.deconv1(encoding) # (N, 512, 7, 7) -> (N, 256, 15, 15)
         x = self.deconv_bn1(x)
         x = self.relu(x)
-        x = self.deconv2(x)
+        x = self.deconv2(x) # (N, 256, 15, 15) -> (N, 128, 31, 31)
         x = self.deconv_bn2(x)
         x = self.relu(x)
-        x = self.deconv3(x)
+        x = self.deconv3(x) # (N, 128, 31, 31) -> (N, 1, 64, 64)
         x = self.deconv_bn3(x)
         x = self.relu(x)
-        x = self.conv4(x)
+        x = self.conv4(x) # (N, 1, 64, 64) -> (N, 1, 64, 64)
 
+        # x -> output heatmap, attn_weights -> mean of attention, encoding_inout -> in/out
         return x, torch.mean(attn_weights, 1, keepdim=True), encoding_inout
 
 
@@ -338,7 +354,7 @@ class ModelSpatioTemporal(nn.Module):
 
     def _make_layer_scene(self, block, planes, blocks, stride=1):
         downsample = None
-        if stride != 1 or self.inplanes_scene != planes * block.expansion:
+        if stride != 1 or self.inplanes_scene != planes * block.expansion: # if residual size is bigger than output
             downsample = nn.Sequential(
                 nn.Conv2d(self.inplanes_scene, planes * block.expansion,
                           kernel_size=1, stride=stride, bias=False),
@@ -355,7 +371,7 @@ class ModelSpatioTemporal(nn.Module):
 
     def _make_layer_face(self, block, planes, blocks, stride=1):
         downsample = None
-        if stride != 1 or self.inplanes_face != planes * block.expansion:
+        if stride != 1 or self.inplanes_face != planes * block.expansion: # if residual size is bigger than output
             downsample = nn.Sequential(
                 nn.Conv2d(self.inplanes_face, planes * block.expansion,
                           kernel_size=1, stride=stride, bias=False),

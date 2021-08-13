@@ -8,3 +8,5 @@ data/gazefollow
 data/videoatttarget
 *.pt
 *.pyc
+*.jpg
+*.png

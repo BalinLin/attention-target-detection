@@ -33,9 +33,10 @@ class GazeFollow(Dataset):
             column_names = ['path', 'idx', 'body_bbox_x', 'body_bbox_y', 'body_bbox_w', 'body_bbox_h', 'eye_x', 'eye_y',
                             'gaze_x', 'gaze_y', 'bbox_x_min', 'bbox_y_min', 'bbox_x_max', 'bbox_y_max', 'meta']
             df = pd.read_csv(csv_path, sep=',', names=column_names, index_col=False, encoding="utf-8-sig")
+            # make ['path', 'eye_x'] as pair key, one ['path', 'eye_x'] pair have a lot of label with different "gaze_x, gaze_y"
             df = df[['path', 'eye_x', 'eye_y', 'gaze_x', 'gaze_y', 'bbox_x_min', 'bbox_y_min', 'bbox_x_max',
                     'bbox_y_max']].groupby(['path', 'eye_x'])
-            self.keys = list(df.groups.keys())
+            self.keys = list(df.groups.keys()) # ['path', 'eye_x'] pair key
             self.X_test = df
             self.length = len(self.keys)
         else:
@@ -59,7 +60,7 @@ class GazeFollow(Dataset):
 
     def __getitem__(self, index):
         if self.test:
-            g = self.X_test.get_group(self.keys[index])
+            g = self.X_test.get_group(self.keys[index]) # label of ['path', 'eye_x'] pair
             cont_gaze = []
             for i, row in g.iterrows():
                 path = row['path']
@@ -91,7 +92,7 @@ class GazeFollow(Dataset):
         img = Image.open(os.path.join(self.data_dir, path))
         img = img.convert('RGB')
         width, height = img.size
-        x_min, y_min, x_max, y_max = map(float, [x_min, y_min, x_max, y_max])
+        x_min, y_min, x_max, y_max = map(float, [x_min, y_min, x_max, y_max]) # map type to float
 
         if self.imshow:
             img.save("origin_img.jpg")
@@ -128,11 +129,12 @@ class GazeFollow(Dataset):
                 crop_height_min = crop_y_max - crop_y_min
                 crop_width_max = width - crop_x_min
                 crop_height_max = height - crop_y_min
+
                 # Randomly select a width and a height
                 crop_width = np.random.uniform(crop_width_min, crop_width_max)
                 crop_height = np.random.uniform(crop_height_min, crop_height_max)
 
-                # Crop it
+                # Crop it (https://pytorch.org/vision/master/_modules/torchvision/transforms/functional.html)
                 img = TF.crop(img, crop_y_min, crop_x_min, crop_height, crop_width)
 
                 # Record the crop's (x, y) offset
@@ -163,6 +165,7 @@ class GazeFollow(Dataset):
                 img = TF.adjust_contrast(img, contrast_factor=np.random.uniform(0.5, 1.5))
                 img = TF.adjust_saturation(img, saturation_factor=np.random.uniform(0, 1.5))
 
+        # get head position
         head_channel = imutils.get_head_box_channel(x_min, y_min, x_max, y_max, width, height,
                                                     resolution=self.input_size, coordconv=False).unsqueeze(0)
 
@@ -180,6 +183,7 @@ class GazeFollow(Dataset):
         # generate the heat map used for deconv prediction
         gaze_heatmap = torch.zeros(self.output_size, self.output_size)  # set the size of the output
         if self.test:  # aggregated heatmap
+            # NOTE: torch.max(gaze_heatmap) ~= 0.1
             num_valid = 0
             for gaze_x, gaze_y in cont_gaze:
                 if gaze_x != -1:
@@ -189,6 +193,7 @@ class GazeFollow(Dataset):
                                                          type='Gaussian')
             gaze_heatmap /= num_valid
         else:
+            # NOTE: torch.max(gaze_heatmap) = 1
             # if gaze_inside:
             gaze_heatmap = imutils.draw_labelmap(gaze_heatmap, [gaze_x * self.output_size, gaze_y * self.output_size],
                                                  3,

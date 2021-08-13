@@ -46,7 +46,7 @@ to train the model. You can expect to see similar learning curves to [ours](http
 
 ## Experiment on the VideoAttentionTarget dataset
 ### Dataset
-We created a new dataset, *VideoAttentionTarget*, with fully annotated attention targets in video for this experiment. Dataset details can be found in our paper. Download the VideoAttentionTarget dataset from [here](https://www.dropbox.com/s/8ep3y1hd74wdjy5/videoattentiontarget.zip?dl=0).  
+We created a new dataset, *VideoAttentionTarget*, with fully annotated attention targets in video for this experiment. Dataset details can be found in our paper. Download the VideoAttentionTarget dataset from [here](https://www.dropbox.com/s/8ep3y1hd74wdjy5/videoattentiontarget.zip?dl=0).
 
 Please adjust the dataset path accordingly in config.py.
 ### Evaluation
@@ -62,6 +62,13 @@ Run:
 python train_on_videoatttarget.py
 ```
 to do the temporal training.
+
+### Tensorboard
+Run:
+```
+## pip install tensorflow
+tensorboard --logdir=[yourlogdir]
+```
 
 ## Citation
 If you use our dataset and/or code, please cite
