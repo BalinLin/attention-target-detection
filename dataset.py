@@ -23,7 +23,7 @@ from utils import myutils
 from config import *
 
 import warnings
-warnings.simplefilter(action='ignore', category=FutureWarning)
+warnings.simplefilter(action='ignore')
 
 
 class GazeFollow(Dataset):

@@ -15,7 +15,7 @@ import shutil
 import numpy as np
 import warnings
 
-warnings.simplefilter(action='ignore', category=FutureWarning)
+warnings.simplefilter(action='ignore')
 
 
 parser = argparse.ArgumentParser()

@@ -17,7 +17,7 @@ from scipy.misc import imresize
 from tensorboardX import SummaryWriter
 import warnings
 
-warnings.simplefilter(action='ignore', category=FutureWarning)
+warnings.simplefilter(action='ignore')
 
 
 parser = argparse.ArgumentParser()

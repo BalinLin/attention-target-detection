@@ -15,7 +15,7 @@ import numpy as np
 from scipy.misc import imresize
 import warnings
 
-warnings.simplefilter(action='ignore', category=FutureWarning)
+warnings.simplefilter(action='ignore')
 
 
 parser = argparse.ArgumentParser()
