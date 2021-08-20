@@ -6,6 +6,54 @@ import math
 from lib.pytorch_convolutional_rnn import convolutional_rnn
 import numpy as np
 
+class involution(nn.Module):
+
+    def __init__(self,
+                 channels,
+                 kernel_size,
+                 stride):
+        super(involution, self).__init__()
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.channels = channels
+        reduction_ratio = 4
+        self.group_channels = 16
+        self.groups = self.channels // self.group_channels
+        self.conv1 = nn.Conv2d(channels, channels // reduction_ratio, kernel_size=1, stride=1, bias=False)
+        self.bn1 = nn.BatchNorm2d(channels // reduction_ratio)
+        self.conv2 = nn.Conv2d(channels // reduction_ratio, kernel_size**2 * self.groups, kernel_size=1, stride=1)
+        # Bias will be set as True if `norm_cfg` is None, otherwise False.
+        # self.conv1 = ConvModule(
+        #     in_channels=channels,
+        #     out_channels=channels // reduction_ratio,
+        #     kernel_size=1,
+        #     conv_cfg=None,
+        #     norm_cfg=dict(type='BN'),
+        #     act_cfg=dict(type='ReLU'))
+        # self.conv2 = ConvModule(
+        #     in_channels=channels // reduction_ratio,
+        #     out_channels=kernel_size**2 * self.groups,
+        #     kernel_size=1,
+        #     stride=1,
+        #     conv_cfg=None,
+        #     norm_cfg=None,
+        #     act_cfg=None)
+        if stride > 1:
+            self.avgpool = nn.AvgPool2d(stride, stride)
+        self.relu = nn.ReLU(inplace=True)
+        self.unfold = nn.Unfold(kernel_size, 1, (kernel_size-1)//2, stride)
+
+    def forward(self, x):
+        weight = x if self.stride == 1 else self.avgpool(x)
+        weight = self.conv1(weight)
+        weight = self.bn1(weight)
+        weight = self.relu(weight)
+        weight = self.conv2(weight)
+        b, c, h, w = weight.shape
+        weight = weight.view(b, self.groups, self.kernel_size**2, h, w).unsqueeze(2)
+        out = self.unfold(x).view(b, self.groups, self.group_channels, self.kernel_size**2, h, w)
+        out = (weight * out).sum(dim=3).view(b, self.channels, h, w)
+        return out
 
 # https://pytorch.org/docs/stable/generated/torch.nn.Conv2d.html
 class Bottleneck(nn.Module):
@@ -133,6 +181,11 @@ class ModelSpatial(nn.Module):
         # attention
         self.attn = nn.Linear(1808, 1*7*7)
 
+        # involution
+        # conv2 = involution(inputchannel, midchannel, stride)
+        self.inv1_scene = involution(1024, 7, 1)
+        self.inv1_face = involution(1024, 7, 1)
+
         # encoding for saliency
         self.compress_conv1 = nn.Conv2d(2048, 1024, kernel_size=1, stride=1, padding=0, bias=False)
         self.compress_bn1 = nn.BatchNorm2d(1024)
@@ -199,6 +252,43 @@ class ModelSpatial(nn.Module):
         return nn.Sequential(*layers)
 
 
+    def _make_stem_layer(self, in_channels, stem_channels):
+        self.stem = nn.Sequential(
+            nn.Conv2d(in_channels, stem_channels // 2,
+                      kernel_size=3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(stem_channels // 2),
+            involution(stem_channels // 2, 3, 1),
+            nn.BatchNorm2d(stem_channels // 2),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(stem_channels // 2, stem_channels,
+                      kernel_size=3, stride=1, padding=1, bias=False),
+            )
+        ## conv_cfg=None, norm_cfg=dict(type='BN', requires_grad=True)
+        ## Bias will be set as True if `norm_cfg` is None, otherwise False.
+        # self.stem = nn.Sequential(
+        #     ConvModule(
+        #         in_channels,
+        #         stem_channels // 2,
+        #         kernel_size=3,
+        #         stride=2,
+        #         padding=1,
+        #         conv_cfg=self.conv_cfg,
+        #         norm_cfg=self.norm_cfg,
+        #         inplace=True),
+        #     involution(stem_channels // 2, 3, 1),
+        #     nn.BatchNorm2d(stem_channels // 2),
+        #     nn.ReLU(inplace=True),
+        #     ConvModule(
+        #         stem_channels // 2,
+        #         stem_channels,
+        #         kernel_size=3,
+        #         stride=1,
+        #         padding=1,
+        #         conv_cfg=self.conv_cfg,
+        #         norm_cfg=self.norm_cfg,
+        #         inplace=True)
+        #     )
+
     def forward(self, images, head, face):
         ### images -> whole image(Scene Image), head -> position image(Head Position), face -> head image(Cropped Head)
         # images.shape -> torch.Size([batch_size, 3, 224, 224]),
@@ -213,6 +303,7 @@ class ModelSpatial(nn.Module):
         face = self.layer3_face(face)      # (N, 512, 28, 28)  -> (N, 1024, 14, 14)
         face = self.layer4_face(face)      # (N, 1024, 14, 14) -> (N, 2048, 7, 7)
         face_feat = self.layer5_face(face) # (N, 2048, 7, 7)   -> (N, 1024, 7, 7)
+        face_feat = self.inv1_face(face_feat)
 
         # reduce head channel size by max pooling: (N, 1, 224, 224) -> (N, 1, 28, 28)
         head_reduced = self.maxpool(self.maxpool(self.maxpool(head))).view(-1, 784)
@@ -237,6 +328,7 @@ class ModelSpatial(nn.Module):
         im = self.layer3_scene(im)          # (N, 512, 28, 28)  -> (N, 1024, 14, 14)
         im = self.layer4_scene(im)          # (N, 1024, 14, 14) -> (N, 2048, 7, 7)
         scene_feat = self.layer5_scene(im)  # (N, 2048, 7, 7)   -> (N, 1024, 7, 7)
+        scene_feat = self.inv1_scene(scene_feat)
 
         # applying attention weights on scene feat
         # attn_weights = torch.ones(attn_weights.shape)/49.0
