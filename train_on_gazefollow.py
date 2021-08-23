@@ -83,9 +83,6 @@ def train():
         pretrained_dict = pretrained_dict['model']
         model_dict.update(pretrained_dict)
         model.load_state_dict(model_dict)
-    # print("="*50)
-    # print(model)
-    # print("="*50)
 
     # Loss functions
     # MSE(https://blog.csdn.net/hao5335156/article/details/81029791)
@@ -166,6 +163,7 @@ def train():
                         # predict heatmap(N, 1, 64, 64), mean of attention, in/out
                         val_gaze_heatmap_pred, val_attmap, val_inout_pred = model(val_images, val_head, val_faces)
                         val_gaze_heatmap_pred = val_gaze_heatmap_pred.squeeze(1) # (N, 1, 64, 64) -> (N, 64, 64)
+                        val_gaze_heatmap_pred = val_gaze_heatmap_pred.cpu()
 
                         # go through each data point and record AUC, min dist, avg dist
                         for b_i in range(len(cont_gaze)):

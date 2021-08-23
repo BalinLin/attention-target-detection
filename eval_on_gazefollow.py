@@ -76,6 +76,7 @@ def testAll():
                     val_gaze_heatmap = val_gaze_heatmap.cuda().to(device)
                     val_gaze_heatmap_pred, val_attmap, val_inout_pred = model(val_images, val_head, val_faces)
                     val_gaze_heatmap_pred = val_gaze_heatmap_pred.squeeze(1)
+                    val_gaze_heatmap_pred = val_gaze_heatmap_pred.cpu()
 
                     # go through each data point and record AUC, min dist, avg dist
                     for b_i in range(len(cont_gaze)):
@@ -145,6 +146,7 @@ def test():
             val_gaze_heatmap = val_gaze_heatmap.cuda().to(device)
             val_gaze_heatmap_pred, val_attmap, val_inout_pred = model(val_images, val_head, val_faces)
             val_gaze_heatmap_pred = val_gaze_heatmap_pred.squeeze(1)
+            val_gaze_heatmap_pred = val_gaze_heatmap_pred.cpu()
 
             # go through each data point and record AUC, min dist, avg dist
             for b_i in range(len(cont_gaze)):
