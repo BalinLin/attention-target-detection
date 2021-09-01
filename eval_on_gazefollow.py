@@ -21,9 +21,10 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--device", type=int, default=0, help="gpu id")
 parser.add_argument("--model_weights", type=str, default="model_gazefollow.pt", help="model weights")
 parser.add_argument("--batch_size", type=int, default=48, help="batch size")
+parser.add_argument("--log_dir", type=str, default="2021-08-26_06-55-45", help="directory to eval log files")
 args = parser.parse_args()
 home = os.path.expanduser("~")
-logfolder = "2021-08-13_19-35-56"
+logfolder = args.log_dir
 logdir = os.path.join("logs", logfolder)
 
 
@@ -176,5 +177,5 @@ def test():
           torch.mean(torch.tensor(avg_dist))))
 
 if __name__ == "__main__":
-    test()
-    # testAll()
+    # test()
+    testAll()
