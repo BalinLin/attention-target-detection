@@ -24,7 +24,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--device", type=int, default=0, help="gpu id")
 parser.add_argument("--init_weights", type=str, default="initial_weights_for_spatial_training.pt", help="initial weights")
 parser.add_argument("--lr", type=float, default=2.5e-4, help="learning rate")
-parser.add_argument("--batch_size", type=int, default=48, help="batch size")
+parser.add_argument("--batch_size", type=int, default=32, help="batch size")
 parser.add_argument("--epochs", type=int, default=70, help="number of epochs")
 parser.add_argument("--print_every", type=int, default=100, help="print every ___ iterations")
 parser.add_argument("--eval_every", type=int, default=500, help="evaluate every ___ iterations")
@@ -77,12 +77,12 @@ def train():
     print("Constructing model")
     model = ModelSpatial()
     model.cuda().to(device)
-    if args.init_weights:
-        model_dict = model.state_dict()
-        pretrained_dict = torch.load(args.init_weights)
-        pretrained_dict = pretrained_dict['model']
-        model_dict.update(pretrained_dict)
-        model.load_state_dict(model_dict)
+    # if args.init_weights:
+    #     model_dict = model.state_dict()
+    #     pretrained_dict = torch.load(args.init_weights)
+    #     pretrained_dict = pretrained_dict['model']
+    #     model_dict.update(pretrained_dict)
+    #     model.load_state_dict(model_dict)
 
     # Loss functions
     # MSE(https://blog.csdn.net/hao5335156/article/details/81029791)
