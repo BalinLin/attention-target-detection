@@ -78,12 +78,12 @@ def train():
     print("Constructing model")
     model = ModelSpatial()
     model.cuda().to(device)
-    if args.init_weights:
-        model_dict = model.state_dict()
-        pretrained_dict = torch.load(args.init_weights)
-        pretrained_dict = pretrained_dict['model']
-        model_dict.update(pretrained_dict)
-        model.load_state_dict(model_dict)
+    # if args.init_weights:
+    #     model_dict = model.state_dict()
+    #     pretrained_dict = torch.load(args.init_weights)
+    #     pretrained_dict = pretrained_dict['model']
+    #     model_dict.update(pretrained_dict)
+    #     model.load_state_dict(model_dict)
 
     # Loss functions
     # MSE(https://blog.csdn.net/hao5335156/article/details/81029791)

@@ -5,6 +5,7 @@ from torch.nn.utils.rnn import pack_padded_sequence, PackedSequence
 import math
 from lib.pytorch_convolutional_rnn import convolutional_rnn
 import numpy as np
+from lib.rednet.rednet import *
 
 
 # https://pytorch.org/docs/stable/generated/torch.nn.Conv2d.html
@@ -113,22 +114,40 @@ class ModelSpatial(nn.Module):
         self.avgpool = nn.AvgPool2d(7, stride=1)
 
         # scene pathway, input size = 4 means Scene Image cat with Head Position
-        self.conv1_scene = nn.Conv2d(4, 64, kernel_size=7, stride=2, padding=3, bias=False)
-        self.bn1_scene = nn.BatchNorm2d(64)
-        self.layer1_scene = self._make_layer_scene(block, 64, layers_scene[0])
-        self.layer2_scene = self._make_layer_scene(block, 128, layers_scene[1], stride=2)
-        self.layer3_scene = self._make_layer_scene(block, 256, layers_scene[2], stride=2)
-        self.layer4_scene = self._make_layer_scene(block, 512, layers_scene[3], stride=2)
-        self.layer5_scene = self._make_layer_scene(block, 256, layers_scene[4], stride=1) # additional to resnet50
+        # self.conv1_scene = nn.Conv2d(4, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        # self.bn1_scene = nn.BatchNorm2d(64)
+        # self.layer1_scene = self._make_layer_scene(block, 64, layers_scene[0])
+        # self.layer2_scene = self._make_layer_scene(block, 128, layers_scene[1], stride=2)
+        # self.layer3_scene = self._make_layer_scene(block, 256, layers_scene[2], stride=2)
+        # self.layer4_scene = self._make_layer_scene(block, 512, layers_scene[3], stride=2)
+        # self.layer5_scene = self._make_layer_scene(block, 256, layers_scene[4], stride=1) # additional to resnet50
+        self.rednet_scene = RedNet(in_channels = 4, depth = 50)
+        self.conv1_scene = ConvModule(
+            in_channels=2048,
+            out_channels=1024,
+            kernel_size=1,
+            stride=1,
+            conv_cfg=None,
+            norm_cfg=None,
+            act_cfg=None)
 
         # face pathway
-        self.conv1_face = nn.Conv2d(3, 64, kernel_size = 7, stride = 2, padding = 3, bias = False)
-        self.bn1_face = nn.BatchNorm2d(64)
-        self.layer1_face = self._make_layer_face(block, 64, layers_face[0])
-        self.layer2_face = self._make_layer_face(block, 128, layers_face[1], stride=2)
-        self.layer3_face = self._make_layer_face(block, 256, layers_face[2], stride=2)
-        self.layer4_face = self._make_layer_face(block, 512, layers_face[3], stride=2)
-        self.layer5_face = self._make_layer_face(block, 256, layers_face[4], stride=1) # additional to resnet50
+        # self.conv1_face = nn.Conv2d(3, 64, kernel_size = 7, stride = 2, padding = 3, bias = False)
+        # self.bn1_face = nn.BatchNorm2d(64)
+        # self.layer1_face = self._make_layer_face(block, 64, layers_face[0])
+        # self.layer2_face = self._make_layer_face(block, 128, layers_face[1], stride=2)
+        # self.layer3_face = self._make_layer_face(block, 256, layers_face[2], stride=2)
+        # self.layer4_face = self._make_layer_face(block, 512, layers_face[3], stride=2)
+        # self.layer5_face = self._make_layer_face(block, 256, layers_face[4], stride=1) # additional to resnet50
+        self.rednet_face = RedNet(depth = 50)
+        self.conv1_face = ConvModule(
+            in_channels=2048,
+            out_channels=1024,
+            kernel_size=1,
+            stride=1,
+            conv_cfg=None,
+            norm_cfg=None,
+            act_cfg=None)
 
         # attention
         self.attn = nn.Linear(1808, 1*7*7)
@@ -204,15 +223,18 @@ class ModelSpatial(nn.Module):
         # images.shape -> torch.Size([batch_size, 3, 224, 224]),
         # face.shape -> torch.Size([batch_size, 3, 224, 224])
         # head.shape -> torch.Size([batch_size, 1, 224, 224])
-        face = self.conv1_face(face)       # (N, 3, 224, 224) -> (N, 64, 112, 112)
-        face = self.bn1_face(face)
-        face = self.relu(face)
-        face = self.maxpool(face)          # (N, 64, 112, 112) -> (N, 64, 56, 56)
-        face = self.layer1_face(face)      # (N, 64, 56, 56)   -> (N, 256, 56, 56)
-        face = self.layer2_face(face)      # (N, 256, 56, 56)  -> (N, 512, 28, 28)
-        face = self.layer3_face(face)      # (N, 512, 28, 28)  -> (N, 1024, 14, 14)
-        face = self.layer4_face(face)      # (N, 1024, 14, 14) -> (N, 2048, 7, 7)
-        face_feat = self.layer5_face(face) # (N, 2048, 7, 7)   -> (N, 1024, 7, 7)
+        # face = self.conv1_face(face)       # (N, 3, 224, 224) -> (N, 64, 112, 112)
+        # face = self.bn1_face(face)
+        # face = self.relu(face)
+        # face = self.maxpool(face)          # (N, 64, 112, 112) -> (N, 64, 56, 56)
+        # face = self.layer1_face(face)      # (N, 64, 56, 56)   -> (N, 256, 56, 56)
+        # face = self.layer2_face(face)      # (N, 256, 56, 56)  -> (N, 512, 28, 28)
+        # face = self.layer3_face(face)      # (N, 512, 28, 28)  -> (N, 1024, 14, 14)
+        # face = self.layer4_face(face)      # (N, 1024, 14, 14) -> (N, 2048, 7, 7)
+        # face_feat = self.layer5_face(face) # (N, 2048, 7, 7)   -> (N, 1024, 7, 7)
+
+        face = self.rednet_face(face)        # (N, 3, 224, 224)  -> (N, 2048, 7, 7)
+        face_feat = self.conv1_face(face)    # (N, 2048, 7, 7)   -> (N, 1024, 7, 7)
 
         # reduce head channel size by max pooling: (N, 1, 224, 224) -> (N, 1, 28, 28)
         head_reduced = self.maxpool(self.maxpool(self.maxpool(head))).view(-1, 784)
@@ -228,15 +250,18 @@ class ModelSpatial(nn.Module):
 
         # origin image concat with haed position (N, 3, 224, 224) + (N, 1, 224, 224) -> (N, 4, 224, 224)
         im = torch.cat((images, head), dim=1)
-        im = self.conv1_scene(im)           # (N, 4, 224, 224) -> (N, 64, 112, 112)
-        im = self.bn1_scene(im)
-        im = self.relu(im)
-        im = self.maxpool(im)               # (N, 64, 112, 112) -> (N, 64, 56, 56)
-        im = self.layer1_scene(im)          # (N, 64, 56, 56)   -> (N, 256, 56, 56)
-        im = self.layer2_scene(im)          # (N, 256, 56, 56)  -> (N, 512, 28, 28)
-        im = self.layer3_scene(im)          # (N, 512, 28, 28)  -> (N, 1024, 14, 14)
-        im = self.layer4_scene(im)          # (N, 1024, 14, 14) -> (N, 2048, 7, 7)
-        scene_feat = self.layer5_scene(im)  # (N, 2048, 7, 7)   -> (N, 1024, 7, 7)
+        # im = self.conv1_scene(im)           # (N, 4, 224, 224) -> (N, 64, 112, 112)
+        # im = self.bn1_scene(im)
+        # im = self.relu(im)
+        # im = self.maxpool(im)               # (N, 64, 112, 112) -> (N, 64, 56, 56)
+        # im = self.layer1_scene(im)          # (N, 64, 56, 56)   -> (N, 256, 56, 56)
+        # im = self.layer2_scene(im)          # (N, 256, 56, 56)  -> (N, 512, 28, 28)
+        # im = self.layer3_scene(im)          # (N, 512, 28, 28)  -> (N, 1024, 14, 14)
+        # im = self.layer4_scene(im)          # (N, 1024, 14, 14) -> (N, 2048, 7, 7)
+        # scene_feat = self.layer5_scene(im)  # (N, 2048, 7, 7)   -> (N, 1024, 7, 7)
+
+        im = self.rednet_scene(im)            # (N, 3, 224, 224)  -> (N, 2048, 7, 7)
+        scene_feat = self.conv1_scene(im)     # (N, 2048, 7, 7)   -> (N, 1024, 7, 7)
 
         # applying attention weights on scene feat
         # attn_weights = torch.ones(attn_weights.shape)/49.0
