@@ -183,6 +183,30 @@ class ModelSpatial(nn.Module):
                 m.weight.data.fill_(1)
                 m.bias.data.zero_()
 
+        # load pretrained rednet50
+        pretrained = torch.load('rednet50.pth')
+        pretrained_dict = pretrained['state_dict']
+        pretrained_list = list(pretrained_dict.items())
+
+        # init rednet50 scene with pretrained
+        model_dict = self.rednet_scene.state_dict()
+        count = 0
+        for key in model_dict:
+            if count == 0: continue
+            layer_name, weights = pretrained_list[count]
+            model_dict[key] = weights
+            count += 1
+        self.rednet_scene.load_state_dict(model_dict)
+
+        # init rednet50 face with pretrained
+        model_dict = self.rednet_face.state_dict()
+        count = 0
+        for key in model_dict:
+            layer_name, weights = pretrained_list[count]
+            model_dict[key] = weights
+            count += 1
+        self.rednet_face.load_state_dict(model_dict)
+
     def _make_layer_scene(self, block, planes, blocks, stride=1):
         downsample = None
         if stride != 1 or self.inplanes_scene != planes * block.expansion: # if residual size is bigger than output
