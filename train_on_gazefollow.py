@@ -24,7 +24,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--device", type=int, default=0, help="gpu id")
 parser.add_argument("--init_weights", type=str, default="initial_weights_for_spatial_training.pt", help="initial weights")
 parser.add_argument("--lr", type=float, default=2.5e-4, help="learning rate")
-parser.add_argument("--batch_size", type=int, default=16, help="batch size")
+parser.add_argument("--batch_size", type=int, default=64, help="batch size")
 parser.add_argument("--epochs", type=int, default=70, help="number of epochs")
 parser.add_argument("--print_every", type=int, default=100, help="print every ___ iterations")
 parser.add_argument("--eval_every", type=int, default=500, help="evaluate every ___ iterations")
@@ -113,7 +113,7 @@ def train():
             gaze_heatmap = gaze_heatmap.cuda().to(device)
 
             # predict heatmap(N, 1, 64, 64), mean of attention, in/out
-            gaze_heatmap_pred, attmap, inout_pred = model(images, head, faces)
+            gaze_heatmap_pred, inout_pred = model(images, head, faces)
             gaze_heatmap_pred = gaze_heatmap_pred.squeeze(1)
 
             # Loss
@@ -161,7 +161,7 @@ def train():
                         val_gaze_heatmap = val_gaze_heatmap.cuda().to(device)
 
                         # predict heatmap(N, 1, 64, 64), mean of attention, in/out
-                        val_gaze_heatmap_pred, val_attmap, val_inout_pred = model(val_images, val_head, val_faces)
+                        val_gaze_heatmap_pred, val_inout_pred = model(val_images, val_head, val_faces)
                         val_gaze_heatmap_pred = val_gaze_heatmap_pred.squeeze(1) # (N, 1, 64, 64) -> (N, 64, 64)
                         val_gaze_heatmap_pred = val_gaze_heatmap_pred.cpu()
 

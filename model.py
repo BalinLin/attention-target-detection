@@ -121,7 +121,7 @@ class ModelSpatial(nn.Module):
         # self.layer3_scene = self._make_layer_scene(block, 256, layers_scene[2], stride=2)
         # self.layer4_scene = self._make_layer_scene(block, 512, layers_scene[3], stride=2)
         # self.layer5_scene = self._make_layer_scene(block, 256, layers_scene[4], stride=1) # additional to resnet50
-        self.rednet_scene = RedNet(in_channels = 4, depth = 50)
+        self.rednet_scene = RedNet(in_channels = 3, depth = 50)
         self.conv1_scene = ConvModule(
             in_channels=2048,
             out_channels=1024,
@@ -192,20 +192,20 @@ class ModelSpatial(nn.Module):
         model_dict = self.rednet_scene.state_dict()
         count = 0
         for key in model_dict:
-            if count == 0: continue
+            # if count == 0: continue
             layer_name, weights = pretrained_list[count]
             model_dict[key] = weights
             count += 1
         self.rednet_scene.load_state_dict(model_dict)
 
         # init rednet50 face with pretrained
-        model_dict = self.rednet_face.state_dict()
-        count = 0
-        for key in model_dict:
-            layer_name, weights = pretrained_list[count]
-            model_dict[key] = weights
-            count += 1
-        self.rednet_face.load_state_dict(model_dict)
+        # model_dict = self.rednet_face.state_dict()
+        # count = 0
+        # for key in model_dict:
+        #     layer_name, weights = pretrained_list[count]
+        #     model_dict[key] = weights
+        #     count += 1
+        # self.rednet_face.load_state_dict(model_dict)
 
     def _make_layer_scene(self, block, planes, blocks, stride=1):
         downsample = None
@@ -257,23 +257,23 @@ class ModelSpatial(nn.Module):
         # face = self.layer4_face(face)      # (N, 1024, 14, 14) -> (N, 2048, 7, 7)
         # face_feat = self.layer5_face(face) # (N, 2048, 7, 7)   -> (N, 1024, 7, 7)
 
-        face = self.rednet_face(face)        # (N, 3, 224, 224)  -> (N, 2048, 7, 7)
-        face_feat = self.conv1_face(face)    # (N, 2048, 7, 7)   -> (N, 1024, 7, 7)
+        # face = self.rednet_face(face)        # (N, 3, 224, 224)  -> (N, 2048, 7, 7)
+        # face_feat = self.conv1_face(face)    # (N, 2048, 7, 7)   -> (N, 1024, 7, 7)
 
         # reduce head channel size by max pooling: (N, 1, 224, 224) -> (N, 1, 28, 28)
-        head_reduced = self.maxpool(self.maxpool(self.maxpool(head))).view(-1, 784)
+        # head_reduced = self.maxpool(self.maxpool(self.maxpool(head))).view(-1, 784)
 
         # reduce face feature size by avg pooling: (N, 1024, 7, 7) -> (N, 1024, 1, 1)
-        face_feat_reduced = self.avgpool(face_feat).view(-1, 1024)
+        # face_feat_reduced = self.avgpool(face_feat).view(-1, 1024)
 
         # get and reshape attention weights such that it can be multiplied with scene feature map
-        attn_weights = self.attn(torch.cat((head_reduced, face_feat_reduced), 1)) # (N, 1808)
-        attn_weights = attn_weights.view(-1, 1, 49) # (N, 1, 49)
-        attn_weights = F.softmax(attn_weights, dim=2) # soft attention weights single-channel, value of attention(dim=2) to be [0-1]
-        attn_weights = attn_weights.view(-1, 1, 7, 7) # (N, 1, 7, 7)
+        # attn_weights = self.attn(torch.cat((head_reduced, face_feat_reduced), 1)) # (N, 1808)
+        # attn_weights = attn_weights.view(-1, 1, 49) # (N, 1, 49)
+        # attn_weights = F.softmax(attn_weights, dim=2) # soft attention weights single-channel, value of attention(dim=2) to be [0-1]
+        # attn_weights = attn_weights.view(-1, 1, 7, 7) # (N, 1, 7, 7)
 
         # origin image concat with haed position (N, 3, 224, 224) + (N, 1, 224, 224) -> (N, 4, 224, 224)
-        im = torch.cat((images, head), dim=1)
+        # im = torch.cat((images, head), dim=1)
         # im = self.conv1_scene(im)           # (N, 4, 224, 224) -> (N, 64, 112, 112)
         # im = self.bn1_scene(im)
         # im = self.relu(im)
@@ -284,18 +284,18 @@ class ModelSpatial(nn.Module):
         # im = self.layer4_scene(im)          # (N, 1024, 14, 14) -> (N, 2048, 7, 7)
         # scene_feat = self.layer5_scene(im)  # (N, 2048, 7, 7)   -> (N, 1024, 7, 7)
 
-        im = self.rednet_scene(im)            # (N, 3, 224, 224)  -> (N, 2048, 7, 7)
-        scene_feat = self.conv1_scene(im)     # (N, 2048, 7, 7)   -> (N, 1024, 7, 7)
+        im = self.rednet_scene(images)            # (N, 3, 224, 224)  -> (N, 2048, 7, 7)
+        # scene_feat = self.conv1_scene(im)     # (N, 2048, 7, 7)   -> (N, 1024, 7, 7)
 
         # applying attention weights on scene feat
         # attn_weights = torch.ones(attn_weights.shape)/49.0
-        attn_applied_scene_feat = torch.mul(attn_weights, scene_feat) # (N, 1, 7, 7) * (N, 1024, 7, 7) -> (N, 1024, 7, 7)
+        # attn_applied_scene_feat = torch.mul(attn_weights, scene_feat) # (N, 1, 7, 7) * (N, 1024, 7, 7) -> (N, 1024, 7, 7)
 
         # attention feature concat with face feature
-        scene_face_feat = torch.cat((attn_applied_scene_feat, face_feat), 1) #  (N, 1024, 7, 7) + (N, 1024, 7, 7) -> (N, 2048, 7, 7)
+        # scene_face_feat = torch.cat((attn_applied_scene_feat, face_feat), 1) #  (N, 1024, 7, 7) + (N, 1024, 7, 7) -> (N, 2048, 7, 7)
 
         # scene + face feat -> in/out
-        encoding_inout = self.compress_conv1_inout(scene_face_feat) # (N, 2048, 7, 7) -> (N, 512, 7, 7)
+        encoding_inout = self.compress_conv1_inout(im) # (N, 2048, 7, 7) -> (N, 512, 7, 7)
         encoding_inout = self.compress_bn1_inout(encoding_inout)
         encoding_inout = self.relu(encoding_inout)
         encoding_inout = self.compress_conv2_inout(encoding_inout) # (N, 512, 7, 7) -> (N, 1, 7, 7)
@@ -305,7 +305,7 @@ class ModelSpatial(nn.Module):
         encoding_inout = self.fc_inout(encoding_inout) # (N, 49) -> (N, 1)
 
         # scene + face feat -> encoding -> decoding
-        encoding = self.compress_conv1(scene_face_feat) # (N, 2048, 7, 7) -> (N, 1024, 7, 7)
+        encoding = self.compress_conv1(im) # (N, 2048, 7, 7) -> (N, 1024, 7, 7)
         encoding = self.compress_bn1(encoding)
         encoding = self.relu(encoding)
         encoding = self.compress_conv2(encoding) # (N, 1024, 7, 7) -> (N, 512, 7, 7)
@@ -326,7 +326,7 @@ class ModelSpatial(nn.Module):
         x = self.conv4(x) # (N, 1, 64, 64) -> (N, 1, 64, 64)
 
         # x -> output heatmap, attn_weights -> mean of attention, encoding_inout -> in/out
-        return x, torch.mean(attn_weights, 1, keepdim=True), encoding_inout
+        return x, encoding_inout
 
 
 class ModelSpatioTemporal(nn.Module):
