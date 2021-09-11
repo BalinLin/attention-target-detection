@@ -75,7 +75,7 @@ def testAll():
                     val_head = val_head_channel.cuda().to(device)
                     val_faces = val_face.cuda().to(device)
                     val_gaze_heatmap = val_gaze_heatmap.cuda().to(device)
-                    val_gaze_heatmap_pred, val_attmap, val_inout_pred = model(val_images, val_head, val_faces)
+                    val_gaze_heatmap_pred, val_inout_pred = model(val_images, val_head, val_faces)
                     val_gaze_heatmap_pred = val_gaze_heatmap_pred.squeeze(1)
                     val_gaze_heatmap_pred = val_gaze_heatmap_pred.cpu()
 
