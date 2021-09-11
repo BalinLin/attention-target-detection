@@ -139,7 +139,7 @@ class ModelSpatial(nn.Module):
         # self.layer3_face = self._make_layer_face(block, 256, layers_face[2], stride=2)
         # self.layer4_face = self._make_layer_face(block, 512, layers_face[3], stride=2)
         # self.layer5_face = self._make_layer_face(block, 256, layers_face[4], stride=1) # additional to resnet50
-        self.rednet_face = RedNet(depth = 50)
+        self.rednet_face = RedNet(in_channels = 3, depth = 50)
         self.conv1_face = ConvModule(
             in_channels=2048,
             out_channels=1024,
@@ -153,13 +153,13 @@ class ModelSpatial(nn.Module):
         self.attn = nn.Linear(1808, 1*7*7)
 
         # encoding for saliency
-        self.compress_conv1 = nn.Conv2d(2048, 1024, kernel_size=1, stride=1, padding=0, bias=False)
+        self.compress_conv1 = nn.Conv2d(4096, 1024, kernel_size=1, stride=1, padding=0, bias=False)
         self.compress_bn1 = nn.BatchNorm2d(1024)
         self.compress_conv2 = nn.Conv2d(1024, 512, kernel_size=1, stride=1, padding=0, bias=False)
         self.compress_bn2 = nn.BatchNorm2d(512)
 
         # encoding for in/out
-        self.compress_conv1_inout = nn.Conv2d(2048, 512, kernel_size=1, stride=1, padding=0, bias=False)
+        self.compress_conv1_inout = nn.Conv2d(4096, 512, kernel_size=1, stride=1, padding=0, bias=False)
         self.compress_bn1_inout = nn.BatchNorm2d(512)
         self.compress_conv2_inout = nn.Conv2d(512, 1, kernel_size=1, stride=1, padding=0, bias=False)
         self.compress_bn2_inout = nn.BatchNorm2d(1)
@@ -189,14 +189,14 @@ class ModelSpatial(nn.Module):
         pretrained_list = list(pretrained_dict.items())
 
         # init rednet50 scene with pretrained
-        model_dict = self.rednet_scene.state_dict()
-        count = 0
-        for key in model_dict:
-            # if count == 0: continue
-            layer_name, weights = pretrained_list[count]
-            model_dict[key] = weights
-            count += 1
-        self.rednet_scene.load_state_dict(model_dict)
+        # model_dict = self.rednet_scene.state_dict()
+        # count = 0
+        # for key in model_dict:
+        #     # if count == 0: continue
+        #     layer_name, weights = pretrained_list[count]
+        #     model_dict[key] = weights
+        #     count += 1
+        # self.rednet_scene.load_state_dict(model_dict)
 
         # init rednet50 face with pretrained
         # model_dict = self.rednet_face.state_dict()
@@ -257,7 +257,7 @@ class ModelSpatial(nn.Module):
         # face = self.layer4_face(face)      # (N, 1024, 14, 14) -> (N, 2048, 7, 7)
         # face_feat = self.layer5_face(face) # (N, 2048, 7, 7)   -> (N, 1024, 7, 7)
 
-        # face = self.rednet_face(face)        # (N, 3, 224, 224)  -> (N, 2048, 7, 7)
+        face = self.rednet_face(face)        # (N, 3, 224, 224)  -> (N, 2048, 7, 7)
         # face_feat = self.conv1_face(face)    # (N, 2048, 7, 7)   -> (N, 1024, 7, 7)
 
         # reduce head channel size by max pooling: (N, 1, 224, 224) -> (N, 1, 28, 28)
@@ -292,10 +292,10 @@ class ModelSpatial(nn.Module):
         # attn_applied_scene_feat = torch.mul(attn_weights, scene_feat) # (N, 1, 7, 7) * (N, 1024, 7, 7) -> (N, 1024, 7, 7)
 
         # attention feature concat with face feature
-        # scene_face_feat = torch.cat((attn_applied_scene_feat, face_feat), 1) #  (N, 1024, 7, 7) + (N, 1024, 7, 7) -> (N, 2048, 7, 7)
+        scene_face_feat = torch.cat((face, im), 1) #  (N, 1024, 7, 7) + (N, 1024, 7, 7) -> (N, 2048, 7, 7)
 
         # scene + face feat -> in/out
-        encoding_inout = self.compress_conv1_inout(im) # (N, 2048, 7, 7) -> (N, 512, 7, 7)
+        encoding_inout = self.compress_conv1_inout(scene_face_feat) # (N, 2048, 7, 7) -> (N, 512, 7, 7)
         encoding_inout = self.compress_bn1_inout(encoding_inout)
         encoding_inout = self.relu(encoding_inout)
         encoding_inout = self.compress_conv2_inout(encoding_inout) # (N, 512, 7, 7) -> (N, 1, 7, 7)
@@ -305,7 +305,7 @@ class ModelSpatial(nn.Module):
         encoding_inout = self.fc_inout(encoding_inout) # (N, 49) -> (N, 1)
 
         # scene + face feat -> encoding -> decoding
-        encoding = self.compress_conv1(im) # (N, 2048, 7, 7) -> (N, 1024, 7, 7)
+        encoding = self.compress_conv1(scene_face_feat) # (N, 2048, 7, 7) -> (N, 1024, 7, 7)
         encoding = self.compress_bn1(encoding)
         encoding = self.relu(encoding)
         encoding = self.compress_conv2(encoding) # (N, 1024, 7, 7) -> (N, 512, 7, 7)
