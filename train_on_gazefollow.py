@@ -2,6 +2,7 @@ from numpy.lib.type_check import imag
 import torch
 from torchvision import transforms
 import torch.nn as nn
+import wandb
 
 from model import ModelSpatial
 from dataset import GazeFollow
@@ -24,7 +25,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--device", type=int, default=0, help="gpu id")
 parser.add_argument("--init_weights", type=str, default="initial_weights_for_spatial_training.pt", help="initial weights")
 parser.add_argument("--lr", type=float, default=2.5e-4, help="learning rate")
-parser.add_argument("--batch_size", type=int, default=48, help="batch size")
+parser.add_argument("--batch_size", type=int, default=32, help="batch size")
 parser.add_argument("--epochs", type=int, default=70, help="number of epochs")
 parser.add_argument("--print_every", type=int, default=100, help="print every ___ iterations")
 parser.add_argument("--eval_every", type=int, default=500, help="evaluate every ___ iterations")
@@ -97,6 +98,9 @@ def train():
     max_steps = len(train_loader)
     optimizer.zero_grad()
 
+    wandb.init(project="gazefollow", config=args)
+    # wandb.watch(model, mse_loss, log='all', log_freq=100)
+
     print("Training in progress ...")
     for ep in range(args.epochs):
         # idx, (img, face, head_channel, gaze_heatmap, path, gaze_inside)
@@ -139,9 +143,16 @@ def train():
 
             if batch % args.print_every == 0:
                 print("Epoch:{:04d}\tstep:{:06d}/{:06d}\ttraining loss: (l2){:.4f} (Xent){:.4f}".format(ep, batch+1, max_steps, l2_loss, Xent_loss))
-                # Tensorboard
-                ind = np.random.choice(len(images), replace=False)
-                writer.add_scalar("Train Loss", total_loss, global_step=step)
+                # wandb loss
+                wandb.log({"Train Loss": total_loss}, step=step)
+                # wandb img
+                t = transforms.Resize(input_resolution)
+                wandb.log({"img": [wandb.Image(images, caption="images"),
+                                   wandb.Image(head, caption="head"),
+                                   wandb.Image(faces, caption="faces"),
+                                   wandb.Image(t(gaze_heatmap.unsqueeze(1)), caption="gaze_heatmap"),
+                                   wandb.Image(t(gaze_heatmap_pred.unsqueeze(1)), caption="gaze_heatmap_pred")]})
+
 
             if (batch != 0 and batch % args.eval_every == 0) or batch+1 == max_steps:
                 print('Validation in progress ...')
@@ -192,11 +203,11 @@ def train():
                       torch.mean(torch.tensor(min_dist)),
                       torch.mean(torch.tensor(avg_dist))))
 
-                # Tensorboard
-                val_ind = np.random.choice(len(val_images), replace=False)
-                writer.add_scalar('Validation AUC', torch.mean(torch.tensor(AUC)), global_step=step)
-                writer.add_scalar('Validation min dist', torch.mean(torch.tensor(min_dist)), global_step=step)
-                writer.add_scalar('Validation avg dist', torch.mean(torch.tensor(avg_dist)), global_step=step)
+                # wandb
+                wandb.log({"Validation AUC": torch.mean(torch.tensor(AUC)),
+                           "Validation min dist": torch.mean(torch.tensor(min_dist)),
+                           "Validation avg dist": torch.mean(torch.tensor(avg_dist))},
+                           step=step)
 
         if ep % args.save_every == 0:
             # save the model

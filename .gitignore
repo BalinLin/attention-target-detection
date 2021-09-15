@@ -6,7 +6,9 @@ lib/__pycache__
 lib/*.pyc
 data/gazefollow
 data/videoatttarget
+wandb
 *.pt
+*.pth
 *.pyc
 *.jpg
 *.png
