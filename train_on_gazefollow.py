@@ -100,6 +100,7 @@ def train():
 
     wandb.init(project="gazefollow", config=args)
     # wandb.watch(model, mse_loss, log='all', log_freq=100)
+    table = wandb.Table(columns=["Info", "images", "faces", "head", "gaze_heatmap", "gaze_heatmap_pred"])
 
     print("Training in progress ...")
     for ep in range(args.epochs):
@@ -147,11 +148,13 @@ def train():
                 wandb.log({"Train Loss": total_loss}, step=step)
                 # wandb img
                 t = transforms.Resize(input_resolution)
-                wandb.log({"img": [wandb.Image(images, caption="images"),
-                                   wandb.Image(head, caption="head"),
-                                   wandb.Image(faces, caption="faces"),
-                                   wandb.Image(t(gaze_heatmap.unsqueeze(1)), caption="gaze_heatmap"),
-                                   wandb.Image(t(gaze_heatmap_pred.unsqueeze(1)), caption="gaze_heatmap_pred")]})
+                table.add_data("Epoch:{:04d}\tstep:{:06d}/{:06d}\ttraining loss: (l2){:.4f} (Xent){:.4f}".format(ep, batch+1, max_steps, l2_loss, Xent_loss),
+                               wandb.Image(images, caption="images"),
+                               wandb.Image(faces, caption="faces"),
+                               wandb.Image(head, caption="head"),
+                               wandb.Image(t(gaze_heatmap.unsqueeze(1)), caption="gaze_heatmap"),
+                               wandb.Image(t(gaze_heatmap_pred.unsqueeze(1)), caption="gaze_heatmap_pred"))
+                wandb.log({"Table": table})
 
 
             if (batch != 0 and batch % args.eval_every == 0) or batch+1 == max_steps:
