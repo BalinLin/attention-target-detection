@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from torch.nn.utils.rnn import pack_padded_sequence, PackedSequence
 import math
 from lib.pytorch_convolutional_rnn import convolutional_rnn
+import torchvision.models as models
 import numpy as np
 
 
@@ -104,8 +105,8 @@ class ModelSpatial(nn.Module):
     # Define a ResNet 50-ish arch [3, 4, 6, 3]
     def __init__(self, block = Bottleneck, layers_scene = [3, 4, 6, 3, 2], layers_face = [3, 4, 6, 3, 2]):
         # Resnet Feature Extractor
-        self.inplanes_scene = 64
-        self.inplanes_face = 64
+        self.inplanes_scene = 2048
+        self.inplanes_face = 2048
         super(ModelSpatial, self).__init__()
         # common
         self.relu = nn.ReLU(inplace=True)
@@ -113,21 +114,11 @@ class ModelSpatial(nn.Module):
         self.avgpool = nn.AvgPool2d(7, stride=1)
 
         # scene pathway, input size = 4 means Scene Image cat with Head Position
-        self.conv1_scene = nn.Conv2d(4, 64, kernel_size=7, stride=2, padding=3, bias=False)
-        self.bn1_scene = nn.BatchNorm2d(64)
-        self.layer1_scene = self._make_layer_scene(block, 64, layers_scene[0])
-        self.layer2_scene = self._make_layer_scene(block, 128, layers_scene[1], stride=2)
-        self.layer3_scene = self._make_layer_scene(block, 256, layers_scene[2], stride=2)
-        self.layer4_scene = self._make_layer_scene(block, 512, layers_scene[3], stride=2)
+        self.scene_resnet50 = models.resnet50(pretrained=True)
         self.layer5_scene = self._make_layer_scene(block, 256, layers_scene[4], stride=1) # additional to resnet50
 
         # face pathway
-        self.conv1_face = nn.Conv2d(3, 64, kernel_size = 7, stride = 2, padding = 3, bias = False)
-        self.bn1_face = nn.BatchNorm2d(64)
-        self.layer1_face = self._make_layer_face(block, 64, layers_face[0])
-        self.layer2_face = self._make_layer_face(block, 128, layers_face[1], stride=2)
-        self.layer3_face = self._make_layer_face(block, 256, layers_face[2], stride=2)
-        self.layer4_face = self._make_layer_face(block, 512, layers_face[3], stride=2)
+        self.face_resnet50 = models.resnet50(pretrained=True)
         self.layer5_face = self._make_layer_face(block, 256, layers_face[4], stride=1) # additional to resnet50
 
         # attention
@@ -163,6 +154,22 @@ class ModelSpatial(nn.Module):
             elif isinstance(m, nn.BatchNorm2d):
                 m.weight.data.fill_(1)
                 m.bias.data.zero_()
+
+        # Initialize scene_resnet50
+        # pretrained_weights = self.scene_resnet50.conv1.weight.clone()
+        # print(self.scene_resnet50.conv1.weight.is_leaf)
+        # print(self.scene_resnet50.conv1.weight.requires_grad)
+        self.scene_resnet50.conv1 = nn.Conv2d(4, 64, kernel_size=7, stride=2, padding=3,bias=False)
+        # self.scene_resnet50.conv1.weight[:, :3].load_state_dict(pretrained_weights)
+        # self.scene_resnet50.conv1.weight[:, 3] = self.scene_resnet50.conv1.weight[:, 0].requires_grad_(True)
+        # self.scene_resnet50.conv1.weight[:,:3,:,:] = torch.nn.Parameter(pretrained_weights)
+        # self.scene_resnet50.conv1.weight[:,3,:,:] = torch.nn.Parameter(pretrained_weights[:,1,:,:])
+        # print(self.scene_resnet50.conv1.weight.is_leaf)
+        # print(self.scene_resnet50.conv1.weight.requires_grad)
+        self.scene_resnet50 = nn.Sequential(*list(self.scene_resnet50.children())[:-2])
+
+        # Initialize face_resnet50
+        self.face_resnet50 = nn.Sequential(*list(self.face_resnet50.children())[:-2])
 
     def _make_layer_scene(self, block, planes, blocks, stride=1):
         downsample = None
@@ -204,14 +211,7 @@ class ModelSpatial(nn.Module):
         # images.shape -> torch.Size([batch_size, 3, 224, 224]),
         # face.shape -> torch.Size([batch_size, 3, 224, 224])
         # head.shape -> torch.Size([batch_size, 1, 224, 224])
-        face = self.conv1_face(face)       # (N, 3, 224, 224) -> (N, 64, 112, 112)
-        face = self.bn1_face(face)
-        face = self.relu(face)
-        face = self.maxpool(face)          # (N, 64, 112, 112) -> (N, 64, 56, 56)
-        face = self.layer1_face(face)      # (N, 64, 56, 56)   -> (N, 256, 56, 56)
-        face = self.layer2_face(face)      # (N, 256, 56, 56)  -> (N, 512, 28, 28)
-        face = self.layer3_face(face)      # (N, 512, 28, 28)  -> (N, 1024, 14, 14)
-        face = self.layer4_face(face)      # (N, 1024, 14, 14) -> (N, 2048, 7, 7)
+        face = self.face_resnet50(face)    # (N, 3, 224, 224) -> (N, 2048, 7, 7)
         face_feat = self.layer5_face(face) # (N, 2048, 7, 7)   -> (N, 1024, 7, 7)
 
         # reduce head channel size by max pooling: (N, 1, 224, 224) -> (N, 1, 28, 28)
@@ -228,14 +228,7 @@ class ModelSpatial(nn.Module):
 
         # origin image concat with haed position (N, 3, 224, 224) + (N, 1, 224, 224) -> (N, 4, 224, 224)
         im = torch.cat((images, head), dim=1)
-        im = self.conv1_scene(im)           # (N, 4, 224, 224) -> (N, 64, 112, 112)
-        im = self.bn1_scene(im)
-        im = self.relu(im)
-        im = self.maxpool(im)               # (N, 64, 112, 112) -> (N, 64, 56, 56)
-        im = self.layer1_scene(im)          # (N, 64, 56, 56)   -> (N, 256, 56, 56)
-        im = self.layer2_scene(im)          # (N, 256, 56, 56)  -> (N, 512, 28, 28)
-        im = self.layer3_scene(im)          # (N, 512, 28, 28)  -> (N, 1024, 14, 14)
-        im = self.layer4_scene(im)          # (N, 1024, 14, 14) -> (N, 2048, 7, 7)
+        im = self.scene_resnet50(im)        # (N, 4, 224, 224) -> (N, 2048, 7, 7)
         scene_feat = self.layer5_scene(im)  # (N, 2048, 7, 7)   -> (N, 1024, 7, 7)
 
         # applying attention weights on scene feat
