@@ -150,7 +150,7 @@ class ModelSpatial(nn.Module):
             act_cfg=None)
 
         # attention
-        self.attn = nn.Linear(1808, 1*7*7)
+        self.attn = nn.Linear(2048, 1*7*7)
 
         # encoding for saliency
         self.compress_conv1 = nn.Conv2d(4096, 1024, kernel_size=1, stride=1, padding=0, bias=False)
@@ -263,14 +263,15 @@ class ModelSpatial(nn.Module):
         # reduce head channel size by max pooling: (N, 1, 224, 224) -> (N, 1, 28, 28)
         # head_reduced = self.maxpool(self.maxpool(self.maxpool(head))).view(-1, 784)
 
-        # reduce face feature size by avg pooling: (N, 1024, 7, 7) -> (N, 1024, 1, 1)
-        # face_feat_reduced = self.avgpool(face_feat).view(-1, 1024)
+        # reduce face feature size by avg pooling: (N, 2048, 7, 7) -> (N, 2048, 1, 1)
+        face_feat_reduced = self.avgpool(face).view(-1, 2048)
 
         # get and reshape attention weights such that it can be multiplied with scene feature map
         # attn_weights = self.attn(torch.cat((head_reduced, face_feat_reduced), 1)) # (N, 1808)
-        # attn_weights = attn_weights.view(-1, 1, 49) # (N, 1, 49)
-        # attn_weights = F.softmax(attn_weights, dim=2) # soft attention weights single-channel, value of attention(dim=2) to be [0-1]
-        # attn_weights = attn_weights.view(-1, 1, 7, 7) # (N, 1, 7, 7)
+        attn_weights = self.attn(face_feat_reduced) # (N, 2048)
+        attn_weights = attn_weights.view(-1, 1, 49) # (N, 1, 49)
+        attn_weights = F.softmax(attn_weights, dim=2) # soft attention weights single-channel, value of attention(dim=2) to be [0-1]
+        attn_weights = attn_weights.view(-1, 1, 7, 7) # (N, 1, 7, 7)
 
         # origin image concat with haed position (N, 3, 224, 224) + (N, 1, 224, 224) -> (N, 4, 224, 224)
         # im = torch.cat((images, head), dim=1)
@@ -288,14 +289,13 @@ class ModelSpatial(nn.Module):
         # scene_feat = self.conv1_scene(im)     # (N, 2048, 7, 7)   -> (N, 1024, 7, 7)
 
         # applying attention weights on scene feat
-        # attn_weights = torch.ones(attn_weights.shape)/49.0
-        # attn_applied_scene_feat = torch.mul(attn_weights, scene_feat) # (N, 1, 7, 7) * (N, 1024, 7, 7) -> (N, 1024, 7, 7)
+        attn_applied_scene_feat = torch.mul(attn_weights, im) # (N, 1, 7, 7) * (N, 2048, 7, 7) -> (N, 2048, 7, 7)
 
         # attention feature concat with face feature
-        scene_face_feat = torch.cat((face, im), 1) #  (N, 1024, 7, 7) + (N, 1024, 7, 7) -> (N, 2048, 7, 7)
+        scene_face_feat = torch.cat((attn_applied_scene_feat, face), 1) #  (N, 2048, 7, 7) + (N, 2048, 7, 7) -> (N, 4096, 7, 7)
 
         # scene + face feat -> in/out
-        encoding_inout = self.compress_conv1_inout(scene_face_feat) # (N, 2048, 7, 7) -> (N, 512, 7, 7)
+        encoding_inout = self.compress_conv1_inout(scene_face_feat) # (N, 4096, 7, 7) -> (N, 512, 7, 7)
         encoding_inout = self.compress_bn1_inout(encoding_inout)
         encoding_inout = self.relu(encoding_inout)
         encoding_inout = self.compress_conv2_inout(encoding_inout) # (N, 512, 7, 7) -> (N, 1, 7, 7)
@@ -305,7 +305,7 @@ class ModelSpatial(nn.Module):
         encoding_inout = self.fc_inout(encoding_inout) # (N, 49) -> (N, 1)
 
         # scene + face feat -> encoding -> decoding
-        encoding = self.compress_conv1(scene_face_feat) # (N, 2048, 7, 7) -> (N, 1024, 7, 7)
+        encoding = self.compress_conv1(scene_face_feat) # (N, 4096, 7, 7) -> (N, 1024, 7, 7)
         encoding = self.compress_bn1(encoding)
         encoding = self.relu(encoding)
         encoding = self.compress_conv2(encoding) # (N, 1024, 7, 7) -> (N, 512, 7, 7)
