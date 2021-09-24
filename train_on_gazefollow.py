@@ -23,7 +23,8 @@ warnings.simplefilter(action='ignore')
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--device", type=int, default=0, help="gpu id")
-parser.add_argument("--init_weights", type=str, default="initial_weights_for_spatial_training.pt", help="initial weights")
+# parser.add_argument("--init_weights", type=str, default="initial_weights_for_spatial_training.pt", help="initial weights")
+parser.add_argument("--init_weights", type=str, default="", help="initial weights")
 parser.add_argument("--lr", type=float, default=2.5e-4, help="learning rate")
 parser.add_argument("--batch_size", type=int, default=32, help="batch size")
 parser.add_argument("--epochs", type=int, default=70, help="number of epochs")
@@ -31,6 +32,7 @@ parser.add_argument("--print_every", type=int, default=100, help="print every __
 parser.add_argument("--eval_every", type=int, default=500, help="evaluate every ___ iterations")
 parser.add_argument("--save_every", type=int, default=1, help="save every ___ epochs")
 parser.add_argument("--log_dir", type=str, default="logs", help="directory to save log files")
+parser.add_argument("--random_seed", type=int, default=12345, help="random seed")
 args = parser.parse_args()
 
 
@@ -43,6 +45,15 @@ def _get_transform():
 
 
 def train():
+    
+    if args.random_seed is not None:
+        torch.manual_seed(args.random_seed)
+        torch.cuda.manual_seed(args.random_seed)
+        torch.cuda.manual_seed_all(args.random_seed)
+        np.random.seed(args.random_seed)
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cudnn.deterministic = True
+
     transform = _get_transform()
 
     # Prepare data
@@ -143,15 +154,9 @@ def train():
 
             if batch % args.print_every == 0:
                 print("Epoch:{:04d}\tstep:{:06d}/{:06d}\ttraining loss: (l2){:.4f} (Xent){:.4f}".format(ep, batch+1, max_steps, l2_loss, Xent_loss))
-                # wandb loss
-                wandb.log({"Train Loss": total_loss}, step=step//args.print_every)
-                # wandb img
-                t = transforms.Resize(input_resolution)
-                wandb.log({"img": [wandb.Image(images, caption="images"),
-                                   wandb.Image(faces, caption="faces"),
-                                   wandb.Image(head, caption="head"),
-                                   wandb.Image(t(gaze_heatmap.unsqueeze(1)), caption="gaze_heatmap"),
-                                   wandb.Image(t(gaze_heatmap_pred.unsqueeze(1)), caption="gaze_heatmap_pred")]}, step=step//args.print_every)
+                # Tensorboard
+                ind = np.random.choice(len(images), replace=False)
+                writer.add_scalar("Train Loss", total_loss, global_step=step)
 
             if (batch != 0 and batch % args.eval_every == 0) or batch+1 == max_steps:
                 print('Validation in progress ...')
@@ -202,11 +207,28 @@ def train():
                       torch.mean(torch.tensor(min_dist)),
                       torch.mean(torch.tensor(avg_dist))))
 
-                # wandb
-                wandb.log({"Validation AUC": torch.mean(torch.tensor(AUC)),
-                           "Validation min dist": torch.mean(torch.tensor(min_dist)),
-                           "Validation avg dist": torch.mean(torch.tensor(avg_dist))},
-                           step=step//args.print_every)
+                # Tensorboard
+                val_ind = np.random.choice(len(val_images), replace=False)
+                writer.add_scalar('Validation AUC', torch.mean(torch.tensor(AUC)), global_step=step)
+                writer.add_scalar('Validation min dist', torch.mean(torch.tensor(min_dist)), global_step=step)
+                writer.add_scalar('Validation avg dist', torch.mean(torch.tensor(avg_dist)), global_step=step)
+
+                if batch+1 == max_steps:
+                    # wandb loss
+                    wandb.log({"Train Loss": total_loss}, step=(ep+1))
+                    # wandb img
+                    t = transforms.Resize(input_resolution)
+                    wandb.log({"img": [wandb.Image(images, caption="images"),
+                                        wandb.Image(faces, caption="faces"),
+                                        wandb.Image(head, caption="head"),
+                                        wandb.Image(t(gaze_heatmap.unsqueeze(1)), caption="gaze_heatmap"),
+                                        wandb.Image(t(gaze_heatmap_pred.unsqueeze(1)), caption="gaze_heatmap_pred")]}, step=(ep+1))
+                    # wandb val
+                    wandb.log({"Validation AUC": torch.mean(torch.tensor(AUC)),
+                            "Validation min dist": torch.mean(torch.tensor(min_dist)),
+                            "Validation avg dist": torch.mean(torch.tensor(avg_dist))},
+                            step=(ep+1))
+
 
         if ep % args.save_every == 0:
             # save the model
