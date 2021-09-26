@@ -45,7 +45,7 @@ def _get_transform():
 
 
 def train():
-    
+
     if args.random_seed is not None:
         torch.manual_seed(args.random_seed)
         torch.cuda.manual_seed(args.random_seed)
@@ -80,7 +80,6 @@ def train():
     os.makedirs(logdir)
 
     writer = SummaryWriter(logdir)
-    np.random.seed(1)
 
     # Define device
     device = torch.device('cuda', args.device)
