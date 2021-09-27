@@ -2,8 +2,10 @@
 # GazeFollow dataset dir config
 # =============================================================================
 gazefollow_train_data = "data/gazefollow"
+gazefollow_train_depth = "data/gazefollow/train_depth_3_without_norm"
 gazefollow_train_label = "data/gazefollow/train_annotations_release.txt"
 gazefollow_val_data = "data/gazefollow"
+gazefollow_val_depth = "data/gazefollow/test2_depth_3_without_norm"
 gazefollow_val_label = "data/gazefollow/test_annotations_release.txt"
 
 

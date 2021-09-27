@@ -26,7 +26,7 @@ parser.add_argument("--device", type=int, default=0, help="gpu id")
 # parser.add_argument("--init_weights", type=str, default="initial_weights_for_spatial_training.pt", help="initial weights")
 parser.add_argument("--init_weights", type=str, default="", help="initial weights")
 parser.add_argument("--lr", type=float, default=2.5e-4, help="learning rate")
-parser.add_argument("--batch_size", type=int, default=32, help="batch size")
+parser.add_argument("--batch_size", type=int, default=96, help="batch size")
 parser.add_argument("--epochs", type=int, default=70, help="number of epochs")
 parser.add_argument("--print_every", type=int, default=100, help="print every ___ iterations")
 parser.add_argument("--eval_every", type=int, default=500, help="evaluate every ___ iterations")
@@ -58,14 +58,14 @@ def train():
 
     # Prepare data
     print("Loading Data")
-    train_dataset = GazeFollow(gazefollow_train_data, gazefollow_train_label,
+    train_dataset = GazeFollow(gazefollow_train_data, gazefollow_train_depth, gazefollow_train_label,
                       transform, input_size=input_resolution, output_size=output_resolution)
     train_loader = torch.utils.data.DataLoader(dataset=train_dataset,
                                                batch_size=args.batch_size,
                                                shuffle=True,
                                                num_workers=0)
 
-    val_dataset = GazeFollow(gazefollow_val_data, gazefollow_val_label,
+    val_dataset = GazeFollow(gazefollow_val_data, gazefollow_val_depth, gazefollow_val_label,
                       transform, input_size=input_resolution, output_size=output_resolution, test=True)
     val_loader = torch.utils.data.DataLoader(dataset=val_dataset,
                                                batch_size=args.batch_size,
@@ -119,15 +119,16 @@ def train():
             # face.shape -> (N, 3, 224, 224)
             # head_channel.shape -> (N, 1, 224, 224)
             # gaze_heatmap -> (N, 64, 64)
-        for batch, (img, face, head_channel, gaze_heatmap, name, gaze_inside) in enumerate(train_loader):
+        for batch, (img, dep, face, head_channel, gaze_heatmap, name, gaze_inside) in enumerate(train_loader):
             model.train(True) # https://stackoverflow.com/questions/51433378/what-does-model-train-do-in-pytorch
             images = img.cuda().to(device)
+            depth = dep.cuda().to(device)
             head = head_channel.cuda().to(device)
             faces = face.cuda().to(device)
             gaze_heatmap = gaze_heatmap.cuda().to(device)
 
             # predict heatmap(N, 1, 64, 64), mean of attention, in/out
-            gaze_heatmap_pred, attmap, inout_pred = model(images, head, faces)
+            gaze_heatmap_pred, attmap, inout_pred = model(images, depth, head, faces)
             gaze_heatmap_pred = gaze_heatmap_pred.squeeze(1)
 
             # Loss
@@ -168,14 +169,15 @@ def train():
                         # head_channel.shape -> (N, 1, 224, 224)
                         # gaze_heatmap -> (N, 64, 64)
                         # cont_gaze -> (N, 20, 2)
-                    for val_batch, (val_img, val_face, val_head_channel, val_gaze_heatmap, cont_gaze, imsize, _) in enumerate(val_loader):
+                    for val_batch, (val_img, val_dep, val_face, val_head_channel, val_gaze_heatmap, cont_gaze, imsize, _) in enumerate(val_loader):
                         val_images = val_img.cuda().to(device)
+                        val_depth = val_dep.cuda().to(device)
                         val_head = val_head_channel.cuda().to(device)
                         val_faces = val_face.cuda().to(device)
                         val_gaze_heatmap = val_gaze_heatmap.cuda().to(device)
 
                         # predict heatmap(N, 1, 64, 64), mean of attention, in/out
-                        val_gaze_heatmap_pred, val_attmap, val_inout_pred = model(val_images, val_head, val_faces)
+                        val_gaze_heatmap_pred, val_attmap, val_inout_pred = model(val_images, val_depth, val_head, val_faces)
                         val_gaze_heatmap_pred = val_gaze_heatmap_pred.squeeze(1) # (N, 1, 64, 64) -> (N, 64, 64)
                         val_gaze_heatmap_pred = val_gaze_heatmap_pred.cpu()
 
@@ -218,6 +220,7 @@ def train():
                     # wandb img
                     t = transforms.Resize(input_resolution)
                     wandb.log({"img": [wandb.Image(images, caption="images"),
+                                        wandb.Image(depth, caption="depth"),
                                         wandb.Image(faces, caption="faces"),
                                         wandb.Image(head, caption="head"),
                                         wandb.Image(t(gaze_heatmap.unsqueeze(1)), caption="gaze_heatmap"),

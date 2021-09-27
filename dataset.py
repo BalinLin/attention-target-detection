@@ -27,7 +27,7 @@ warnings.simplefilter(action='ignore')
 
 
 class GazeFollow(Dataset):
-    def __init__(self, data_dir, csv_path, transform, input_size=input_resolution, output_size=output_resolution,
+    def __init__(self, data_dir, depth_dir, csv_path, transform, input_size=input_resolution, output_size=output_resolution,
                  test=False, imshow=False):
         if test:
             column_names = ['path', 'idx', 'body_bbox_x', 'body_bbox_y', 'body_bbox_w', 'body_bbox_h', 'eye_x', 'eye_y',
@@ -51,6 +51,7 @@ class GazeFollow(Dataset):
             self.length = len(df)
 
         self.data_dir = data_dir
+        self.depth_dir = depth_dir
         self.transform = transform
         self.test = test
 
@@ -91,11 +92,14 @@ class GazeFollow(Dataset):
 
         img = Image.open(os.path.join(self.data_dir, path))
         img = img.convert('RGB')
+        depth = Image.open(os.path.join(self.depth_dir, path.split("/")[1], path.split("/")[2]))
+        depth = depth.convert('RGB')
         width, height = img.size
         x_min, y_min, x_max, y_max = map(float, [x_min, y_min, x_max, y_max]) # map type to float
 
         if self.imshow:
             img.save("origin_img.jpg")
+            depth.save("origin_depth.jpg")
 
         if self.test:
             imsize = torch.IntTensor([width, height])
@@ -136,6 +140,7 @@ class GazeFollow(Dataset):
 
                 # Crop it (https://pytorch.org/vision/master/_modules/torchvision/transforms/functional.html)
                 img = TF.crop(img, crop_y_min, crop_x_min, crop_height, crop_width)
+                depth = TF.crop(depth, crop_y_min, crop_x_min, crop_height, crop_width)
 
                 # Record the crop's (x, y) offset
                 offset_x, offset_y = crop_x_min, crop_y_min
@@ -153,6 +158,7 @@ class GazeFollow(Dataset):
             # Random flip
             if np.random.random_sample() <= 0.5:
                 img = img.transpose(Image.FLIP_LEFT_RIGHT)
+                depth = depth.transpose(Image.FLIP_LEFT_RIGHT)
                 x_max_2 = width - x_min
                 x_min_2 = width - x_max
                 x_max = x_max_2
@@ -174,10 +180,12 @@ class GazeFollow(Dataset):
 
         if self.imshow:
             img.save("img_aug.jpg")
+            depth.save("depth_aug.jpg")
             face.save('face_aug.jpg')
 
         if self.transform is not None:
             img = self.transform(img)
+            depth = self.transform(depth)
             face = self.transform(face)
 
         # generate the heat map used for deconv prediction
@@ -209,9 +217,9 @@ class GazeFollow(Dataset):
             plt.savefig('viz_aug.png')
 
         if self.test:
-            return img, face, head_channel, gaze_heatmap, cont_gaze, imsize, path
+            return img, depth, face, head_channel, gaze_heatmap, cont_gaze, imsize, path
         else:
-            return img, face, head_channel, gaze_heatmap, path, gaze_inside
+            return img, depth, face, head_channel, gaze_heatmap, path, gaze_inside
 
     def __len__(self):
         return self.length
