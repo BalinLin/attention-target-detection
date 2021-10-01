@@ -112,8 +112,8 @@ class ModelSpatial(nn.Module):
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
         self.avgpool = nn.AvgPool2d(7, stride=1)
 
-        # scene pathway, input size = 7 means Scene Image cat with depth map and Head Position
-        self.conv1_scene = nn.Conv2d(7, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        # scene pathway, input size = 5 means Scene Image cat with depth map and Head Position
+        self.conv1_scene = nn.Conv2d(5, 64, kernel_size=7, stride=2, padding=3, bias=False)
         self.bn1_scene = nn.BatchNorm2d(64)
         self.layer1_scene = self._make_layer_scene(block, 64, layers_scene[0])
         self.layer2_scene = self._make_layer_scene(block, 128, layers_scene[1], stride=2)
@@ -227,10 +227,10 @@ class ModelSpatial(nn.Module):
         attn_weights = F.softmax(attn_weights, dim=2) # soft attention weights single-channel, value of attention(dim=2) to be [0-1]
         attn_weights = attn_weights.view(-1, 1, 7, 7) # (N, 1, 7, 7)
 
-        # origin image concat with depth map and haed position (N, 3, 224, 224) + (N, 3, 224, 224) + (N, 1, 224, 224) -> (N, 7, 224, 224)
+        # origin image concat with depth map and haed position (N, 3, 224, 224) + (N, 1, 224, 224) + (N, 1, 224, 224) -> (N, 5, 224, 224)
         im = torch.cat((images, depth), dim=1)
         im = torch.cat((im, head), dim=1)
-        im = self.conv1_scene(im)           # (N, 7, 224, 224) -> (N, 64, 112, 112)
+        im = self.conv1_scene(im)           # (N, 5, 224, 224) -> (N, 64, 112, 112)
         im = self.bn1_scene(im)
         im = self.relu(im)
         im = self.maxpool(im)               # (N, 64, 112, 112) -> (N, 64, 56, 56)

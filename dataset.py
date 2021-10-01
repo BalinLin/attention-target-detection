@@ -93,7 +93,7 @@ class GazeFollow(Dataset):
         img = Image.open(os.path.join(self.data_dir, path))
         img = img.convert('RGB')
         depth = Image.open(os.path.join(self.depth_dir, path.split("/")[1], path.split("/")[2]))
-        depth = depth.convert('RGB')
+        depth = depth.convert('L')
         width, height = img.size
         x_min, y_min, x_max, y_max = map(float, [x_min, y_min, x_max, y_max]) # map type to float
 
@@ -184,8 +184,13 @@ class GazeFollow(Dataset):
             face.save('face_aug.jpg')
 
         if self.transform is not None:
+            transform_list = []
+            transform_list.append(transforms.Resize((input_resolution, input_resolution)))
+            transform_list.append(transforms.ToTensor())
+            transform_depth = transforms.Compose(transform_list)
+        
             img = self.transform(img)
-            depth = self.transform(depth)
+            depth = transform_depth(depth)
             face = self.transform(face)
 
         # generate the heat map used for deconv prediction
