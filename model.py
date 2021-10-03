@@ -156,10 +156,14 @@ class ModelSpatial(nn.Module):
         self.conv4 = nn.Conv2d(1, 1, kernel_size=1, stride=1)
 
         # Initialize weights
+        self.initialize_weights()
+
+    def initialize_weights(self):
         for m in self.modules():
-            if isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
-                n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
-                m.weight.data.normal_(0, math.sqrt(2. / n))
+            if isinstance(m, nn.Linear) or isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    m.bias.data.zero_()
             elif isinstance(m, nn.BatchNorm2d):
                 m.weight.data.fill_(1)
                 m.bias.data.zero_()
@@ -202,7 +206,7 @@ class ModelSpatial(nn.Module):
     def forward(self, images, depth, head, face):
         ### images -> whole image(Scene Image), head -> position image(Head Position), face -> head image(Cropped Head)
         # images.shape -> torch.Size([batch_size, 3, 224, 224]),
-        # depth.shape -> torch.Size([batch_size, 3, 224, 224]),
+        # depth.shape -> torch.Size([batch_size, 1, 224, 224]),
         # face.shape -> torch.Size([batch_size, 3, 224, 224])
         # head.shape -> torch.Size([batch_size, 1, 224, 224])
         face = self.conv1_face(face)       # (N, 3, 224, 224) -> (N, 64, 112, 112)
