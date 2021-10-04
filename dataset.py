@@ -177,21 +177,24 @@ class GazeFollow(Dataset):
 
         # Crop the face
         face = img.crop((int(x_min), int(y_min), int(x_max), int(y_max)))
+        face_depth = depth.crop((int(x_min), int(y_min), int(x_max), int(y_max)))
 
         if self.imshow:
             img.save("img_aug.jpg")
             depth.save("depth_aug.jpg")
             face.save('face_aug.jpg')
+            face_depth.save('face_depth_aug.jpg')
 
         if self.transform is not None:
             transform_list = []
             transform_list.append(transforms.Resize((input_resolution, input_resolution)))
             transform_list.append(transforms.ToTensor())
             transform_depth = transforms.Compose(transform_list)
-        
+
             img = self.transform(img)
             depth = transform_depth(depth)
             face = self.transform(face)
+            face_depth = transform_depth(face_depth)
 
         # generate the heat map used for deconv prediction
         gaze_heatmap = torch.zeros(self.output_size, self.output_size)  # set the size of the output
@@ -222,9 +225,9 @@ class GazeFollow(Dataset):
             plt.savefig('viz_aug.png')
 
         if self.test:
-            return img, depth, face, head_channel, gaze_heatmap, cont_gaze, imsize, path
+            return img, depth, face, face_depth, head_channel, gaze_heatmap, cont_gaze, imsize, path
         else:
-            return img, depth, face, head_channel, gaze_heatmap, path, gaze_inside
+            return img, depth, face, face_depth, head_channel, gaze_heatmap, path, gaze_inside
 
     def __len__(self):
         return self.length

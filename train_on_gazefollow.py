@@ -119,16 +119,17 @@ def train():
             # face.shape -> (N, 3, 224, 224)
             # head_channel.shape -> (N, 1, 224, 224)
             # gaze_heatmap -> (N, 64, 64)
-        for batch, (img, dep, face, head_channel, gaze_heatmap, name, gaze_inside) in enumerate(train_loader):
+        for batch, (img, dep, face, face_dep, head_channel, gaze_heatmap, name, gaze_inside) in enumerate(train_loader):
             model.train(True) # https://stackoverflow.com/questions/51433378/what-does-model-train-do-in-pytorch
             images = img.cuda().to(device)
             depth = dep.cuda().to(device)
             head = head_channel.cuda().to(device)
             faces = face.cuda().to(device)
+            face_depth = face_dep.cuda().to(device)
             gaze_heatmap = gaze_heatmap.cuda().to(device)
 
             # predict heatmap(N, 1, 64, 64), mean of attention, in/out
-            gaze_heatmap_pred, attmap, inout_pred = model(images, depth, head, faces)
+            gaze_heatmap_pred, attmap, inout_pred = model(images, depth, head, faces, face_depth)
             gaze_heatmap_pred = gaze_heatmap_pred.squeeze(1)
 
             # Loss
@@ -169,15 +170,16 @@ def train():
                         # head_channel.shape -> (N, 1, 224, 224)
                         # gaze_heatmap -> (N, 64, 64)
                         # cont_gaze -> (N, 20, 2)
-                    for val_batch, (val_img, val_dep, val_face, val_head_channel, val_gaze_heatmap, cont_gaze, imsize, _) in enumerate(val_loader):
+                    for val_batch, (val_img, val_dep, val_face, val_face_dep, val_head_channel, val_gaze_heatmap, cont_gaze, imsize, _) in enumerate(val_loader):
                         val_images = val_img.cuda().to(device)
                         val_depth = val_dep.cuda().to(device)
                         val_head = val_head_channel.cuda().to(device)
                         val_faces = val_face.cuda().to(device)
+                        val_face_depth = val_face_dep.cuda().to(device)
                         val_gaze_heatmap = val_gaze_heatmap.cuda().to(device)
 
                         # predict heatmap(N, 1, 64, 64), mean of attention, in/out
-                        val_gaze_heatmap_pred, val_attmap, val_inout_pred = model(val_images, val_depth, val_head, val_faces)
+                        val_gaze_heatmap_pred, val_attmap, val_inout_pred = model(val_images, val_depth, val_head, val_faces, val_face_depth)
                         val_gaze_heatmap_pred = val_gaze_heatmap_pred.squeeze(1) # (N, 1, 64, 64) -> (N, 64, 64)
                         val_gaze_heatmap_pred = val_gaze_heatmap_pred.cpu()
 

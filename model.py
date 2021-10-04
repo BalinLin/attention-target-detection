@@ -122,7 +122,7 @@ class ModelSpatial(nn.Module):
         self.layer5_scene = self._make_layer_scene(block, 256, layers_scene[4], stride=1) # additional to resnet50
 
         # face pathway
-        self.conv1_face = nn.Conv2d(3, 64, kernel_size = 7, stride = 2, padding = 3, bias = False)
+        self.conv1_face = nn.Conv2d(4, 64, kernel_size = 7, stride = 2, padding = 3, bias = False)
         self.bn1_face = nn.BatchNorm2d(64)
         self.layer1_face = self._make_layer_face(block, 64, layers_face[0])
         self.layer2_face = self._make_layer_face(block, 128, layers_face[1], stride=2)
@@ -203,13 +203,15 @@ class ModelSpatial(nn.Module):
         return nn.Sequential(*layers)
 
 
-    def forward(self, images, depth, head, face):
+    def forward(self, images, depth, head, face, face_depth):
         ### images -> whole image(Scene Image), head -> position image(Head Position), face -> head image(Cropped Head)
         # images.shape -> torch.Size([batch_size, 3, 224, 224]),
         # depth.shape -> torch.Size([batch_size, 1, 224, 224]),
-        # face.shape -> torch.Size([batch_size, 3, 224, 224])
         # head.shape -> torch.Size([batch_size, 1, 224, 224])
-        face = self.conv1_face(face)       # (N, 3, 224, 224) -> (N, 64, 112, 112)
+        # face.shape -> torch.Size([batch_size, 3, 224, 224])
+        # face_depth.shape -> torch.Size([batch_size, 1, 224, 224])
+        face = torch.cat((face, face_depth), dim=1) # (N, 3, 224, 224) + (N, 1, 224, 224) -> (N, 4, 224, 224)
+        face = self.conv1_face(face)       # (N, 4, 224, 224) -> (N, 64, 112, 112)
         face = self.bn1_face(face)
         face = self.relu(face)
         face = self.maxpool(face)          # (N, 64, 112, 112) -> (N, 64, 56, 56)
