@@ -2,6 +2,7 @@ from numpy.lib.type_check import imag
 import torch
 from torchvision import transforms
 import torch.nn as nn
+from torch.optim import lr_scheduler
 import wandb
 
 from model import ModelSpatial
@@ -25,8 +26,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--device", type=int, default=0, help="gpu id")
 # parser.add_argument("--init_weights", type=str, default="initial_weights_for_spatial_training.pt", help="initial weights")
 parser.add_argument("--init_weights", type=str, default="", help="initial weights")
-parser.add_argument("--lr", type=float, default=2.5e-4, help="learning rate")
-parser.add_argument("--batch_size", type=int, default=24, help="batch size")
+parser.add_argument("--lr", type=float, default=1e-6, help="learning rate")
+parser.add_argument("--batch_size", type=int, default=96, help="batch size")
 parser.add_argument("--epochs", type=int, default=70, help="number of epochs")
 parser.add_argument("--print_every", type=int, default=100, help="print every ___ iterations")
 parser.add_argument("--eval_every", type=int, default=500, help="evaluate every ___ iterations")
@@ -101,7 +102,14 @@ def train():
     bcelogit_loss = nn.BCEWithLogitsLoss()
 
     # Optimizer
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    # optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    optimizer = torch.optim.AdamW(params=model.parameters(), lr=args.lr, betas=(0.9, 0.999), weight_decay=0.01)
+
+    # scheduler
+    # scheduler_multistep increse lr once it meet milestones.
+    # scheduler_plateau reduce lr when plateau (loss not reduce).
+    scheduler_multistep = lr_scheduler.MultiStepLR(optimizer, milestones=[3,5,10], gamma=5)
+    scheduler_plateau = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, verbose=False)
 
     step = 0
     loss_amp_factor = 10000 # multiplied to the loss to prevent underflow
@@ -181,6 +189,14 @@ def train():
                         # predict heatmap(N, 1, 64, 64), mean of attention, in/out
                         val_gaze_heatmap_pred, val_attmap, val_inout_pred = model(val_images, val_depth, val_head, val_faces, val_face_depth)
                         val_gaze_heatmap_pred = val_gaze_heatmap_pred.squeeze(1) # (N, 1, 64, 64) -> (N, 64, 64)
+                        # Loss
+                            # l2 loss computed only for inside case, test set only have inside case.
+                        val_l2_loss = mse_loss(val_gaze_heatmap_pred, val_gaze_heatmap)*loss_amp_factor # (N, 64, 64)
+                        val_l2_loss = torch.mean(val_l2_loss, dim=1) # (N, 64)
+                        val_l2_loss = torch.mean(val_l2_loss, dim=1) # (N)
+                        val_l2_loss = torch.mean(val_l2_loss, dim=0) # (1)
+
+                        val_total_loss = val_l2_loss
                         val_gaze_heatmap_pred = val_gaze_heatmap_pred.cpu()
 
                         # go through each data point and record AUC, min dist, avg dist
@@ -219,6 +235,7 @@ def train():
                 if batch+1 == max_steps:
                     # wandb loss
                     wandb.log({"Train Loss": total_loss}, step=(ep+1))
+
                     # wandb img
                     t = transforms.Resize(input_resolution)
                     wandb.log({"img": [wandb.Image(images, caption="images"),
@@ -228,10 +245,18 @@ def train():
                                         wandb.Image(t(gaze_heatmap.unsqueeze(1)), caption="gaze_heatmap"),
                                         wandb.Image(t(gaze_heatmap_pred.unsqueeze(1)), caption="gaze_heatmap_pred")]}, step=(ep+1))
                     # wandb val
-                    wandb.log({"Validation AUC": torch.mean(torch.tensor(AUC)),
+                    wandb.log({"Validation Loss": val_total_loss,
+                            "Validation AUC": torch.mean(torch.tensor(AUC)),
                             "Validation min dist": torch.mean(torch.tensor(min_dist)),
                             "Validation avg dist": torch.mean(torch.tensor(avg_dist))},
                             step=(ep+1))
+
+                    # wandb learning rate
+                    wandb.log({"Learning Rate": optimizer.param_groups[0]['lr']}, step=(ep+1))
+
+                    # scheduler
+                    scheduler_multistep.step()
+                    scheduler_plateau.step(val_total_loss)
 
 
         if ep % args.save_every == 0:
