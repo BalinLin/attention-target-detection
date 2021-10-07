@@ -244,6 +244,7 @@ def train():
                             all_distances = []
                             for gt_gaze in valid_gaze:
                                 all_distances.append(evaluation.L2_dist(gt_gaze, norm_p))
+                                gt_gaze = gt_gaze.cuda().to(device)
                                 val_gt_direction_temp = gt_gaze - val_eye
                                 val_angle_loss_temp = torch.mean(1 - cosine_similarity(val_direction, val_gt_direction_temp)) * loss_amp_factor_angle
                                 val_angle_loss = val_angle_loss_temp if val_angle_loss > val_angle_loss_temp else val_angle_loss
