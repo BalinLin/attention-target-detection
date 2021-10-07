@@ -3,9 +3,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pack_padded_sequence, PackedSequence
 import math
+import copy
 from lib.pytorch_convolutional_rnn import convolutional_rnn
 import numpy as np
-
+from resnet import resnet18
 
 # https://pytorch.org/docs/stable/generated/torch.nn.Conv2d.html
 class Bottleneck(nn.Module):
@@ -112,8 +113,11 @@ class ModelSpatial(nn.Module):
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
         self.avgpool = nn.AvgPool2d(7, stride=1)
 
-        # scene pathway, input size = 5 means Scene Image cat with depth map and Head Position
-        self.conv1_scene = nn.Conv2d(5, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        # gaze direction
+        self.gaze = GazeTR()
+
+        # scene pathway, input size = 8 means Scene Image cat with depth map and Head Position
+        self.conv1_scene = nn.Conv2d(8, 64, kernel_size=7, stride=2, padding=3, bias=False)
         self.bn1_scene = nn.BatchNorm2d(64)
         self.layer1_scene = self._make_layer_scene(block, 64, layers_scene[0])
         self.layer2_scene = self._make_layer_scene(block, 128, layers_scene[1], stride=2)
@@ -203,13 +207,38 @@ class ModelSpatial(nn.Module):
         return nn.Sequential(*layers)
 
 
-    def forward(self, images, depth, head, face, face_depth):
+    def forward(self, images, depth, head, face, face_depth, gaze_field):
         ### images -> whole image(Scene Image), head -> position image(Head Position), face -> head image(Cropped Head)
         # images.shape -> torch.Size([batch_size, 3, 224, 224]),
         # depth.shape -> torch.Size([batch_size, 1, 224, 224]),
         # head.shape -> torch.Size([batch_size, 1, 224, 224])
         # face.shape -> torch.Size([batch_size, 3, 224, 224])
         # face_depth.shape -> torch.Size([batch_size, 1, 224, 224])
+        # gaze_field.shape -> torch.Size([batch_size, 1, 224, 224])
+        # eye.shape -> torch.Size([batch_size, 2])
+        # gaze.shape -> torch.Size([batch_size, 2])
+        direction = self.gaze(face) # (N, 3, 224, 224) -> (N, 2)
+
+        # infer gaze direction and normalized
+        norm = torch.norm(direction, 2, dim=1)
+        normalized_direction = direction / norm.view([-1, 1])
+
+        # generate gaze field map
+        batch_size, channel, height, width = gaze_field.size()
+        gaze_field = gaze_field.permute([0, 2, 3, 1]).contiguous()
+        gaze_field = gaze_field.view([batch_size, -1, 2])
+        gaze_field = torch.matmul(gaze_field, normalized_direction.view([batch_size, 2, 1]))
+        gaze_field_map = gaze_field.view([batch_size, height, width, 1])
+        gaze_field_map = gaze_field_map.permute([0, 3, 1, 2]).contiguous()
+
+        gaze_field_map = self.relu(gaze_field_map)
+        #print gaze_field_map.size()
+
+        # mask with gaze_field
+        gaze_field_map_2 = torch.pow(gaze_field_map, 3)
+        gaze_field_map_3 = torch.pow(gaze_field_map, 5)
+        images = torch.cat([images, gaze_field_map, gaze_field_map_2, gaze_field_map_3], dim=1) # (N, 3, 224, 224) + (N, 3, 224, 224) -> (N, 6, 224, 224)
+
         face = torch.cat((face, face_depth), dim=1) # (N, 3, 224, 224) + (N, 1, 224, 224) -> (N, 4, 224, 224)
         face = self.conv1_face(face)       # (N, 4, 224, 224) -> (N, 64, 112, 112)
         face = self.bn1_face(face)
@@ -233,10 +262,10 @@ class ModelSpatial(nn.Module):
         attn_weights = F.softmax(attn_weights, dim=2) # soft attention weights single-channel, value of attention(dim=2) to be [0-1]
         attn_weights = attn_weights.view(-1, 1, 7, 7) # (N, 1, 7, 7)
 
-        # origin image concat with depth map and haed position (N, 3, 224, 224) + (N, 1, 224, 224) + (N, 1, 224, 224) -> (N, 5, 224, 224)
+        # origin image concat with depth map and haed position (N, 6, 224, 224) + (N, 1, 224, 224) + (N, 1, 224, 224) -> (N, 8, 224, 224)
         im = torch.cat((images, depth), dim=1)
         im = torch.cat((im, head), dim=1)
-        im = self.conv1_scene(im)           # (N, 5, 224, 224) -> (N, 64, 112, 112)
+        im = self.conv1_scene(im)           # (N, 8, 224, 224) -> (N, 64, 112, 112)
         im = self.bn1_scene(im)
         im = self.relu(im)
         im = self.maxpool(im)               # (N, 64, 112, 112) -> (N, 64, 56, 56)
@@ -285,7 +314,7 @@ class ModelSpatial(nn.Module):
         x = self.conv4(x) # (N, 1, 64, 64) -> (N, 1, 64, 64)
 
         # x -> output heatmap, attn_weights -> mean of attention, encoding_inout -> in/out
-        return x, torch.mean(attn_weights, 1, keepdim=True), encoding_inout
+        return x, torch.mean(attn_weights, 1, keepdim=True), encoding_inout, direction, gaze_field_map
 
 
 class ModelSpatioTemporal(nn.Module):
@@ -468,3 +497,131 @@ class ModelSpatioTemporal(nn.Module):
         deconv = self.conv4(deconv)
 
         return deconv, inout_val, hx
+
+
+def _get_clones(module, N):
+    return nn.ModuleList([copy.deepcopy(module) for i in range(N)])
+
+class TransformerEncoder(nn.Module):
+
+    def __init__(self, encoder_layer, num_layers, norm=None):
+        super().__init__()
+        self.layers = _get_clones(encoder_layer, num_layers)
+        self.num_layers = num_layers
+        self.norm = norm
+
+    def forward(self, src, pos):
+        output = src
+        for layer in self.layers:
+            output = layer(output, pos)
+
+        if self.norm is not None:
+            output = self.norm(output)
+
+        return output
+
+
+class TransformerEncoderLayer(nn.Module):
+
+    def __init__(self, d_model, nhead, dim_feedforward=512, dropout=0.1):
+        super().__init__()
+        self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
+        # Implementation of Feedforward model
+        self.linear1 = nn.Linear(d_model, dim_feedforward)
+        self.dropout = nn.Dropout(dropout)
+        self.linear2 = nn.Linear(dim_feedforward, d_model)
+
+        self.norm1 = nn.LayerNorm(d_model)
+        self.norm2 = nn.LayerNorm(d_model)
+
+        self.dropout1 = nn.Dropout(dropout)
+        self.dropout2 = nn.Dropout(dropout)
+
+        self.activation = nn.ReLU(inplace=True)
+
+    def pos_embed(self, src, pos):
+        batch_pos = pos.unsqueeze(1).repeat(1, src.size(1), 1)
+        return src + batch_pos
+
+
+    def forward(self, src, pos):
+                # src_mask: Optional[Tensor] = None,
+                # src_key_padding_mask: Optional[Tensor] = None):
+                # pos: Optional[Tensor] = None):
+
+        q = k = self.pos_embed(src, pos)
+        src2 = self.self_attn(q, k, value=src)[0]
+        src = src + self.dropout1(src2)
+        src = self.norm1(src)
+
+        src2 = self.linear2(self.dropout(self.activation(self.linear1(src))))
+        src = src + self.dropout2(src2)
+        src = self.norm2(src)
+        return src
+
+class GazeTR(nn.Module):
+    def __init__(self):
+        super(GazeTR, self).__init__()
+        maps = 32
+        nhead = 8
+        dim_feature = 7*7
+        dim_feedforward=512
+        dropout = 0.1
+        num_layers=6
+
+        self.base_model = resnet18(pretrained=False, maps=maps)
+
+        # d_model: dim of Q, K, V
+        # nhead: seq num
+        # dim_feedforward: dim of hidden linear layers
+        # dropout: prob
+
+        encoder_layer = TransformerEncoderLayer(
+                  maps,
+                  nhead,
+                  dim_feedforward,
+                  dropout)
+
+        encoder_norm = nn.LayerNorm(maps)
+        # num_encoder_layer: deeps of layers
+
+        self.encoder = TransformerEncoder(encoder_layer, num_layers, encoder_norm)
+
+        self.cls_token = nn.Parameter(torch.randn(1, 1, maps))
+
+        self.pos_embedding = nn.Embedding(dim_feature+1, maps)
+
+        self.feed = nn.Linear(maps, 2)
+
+        self.loss_op = nn.L1Loss()
+
+
+    def forward(self, x_in):
+        feature = self.base_model(x_in)
+        batch_size = feature.size(0)
+        feature = feature.flatten(2)
+        feature = feature.permute(2, 0, 1)
+
+        cls = self.cls_token.repeat( (1, batch_size, 1))
+        feature = torch.cat([cls, feature], 0)
+
+        position = torch.from_numpy(np.arange(0, 50)).cuda()
+
+        pos_feature = self.pos_embedding(position)
+
+        # feature is [HW, batch, channel]
+        feature = self.encoder(feature, pos_feature)
+
+        feature = feature.permute(1, 2, 0)
+
+        feature = feature[:,:,0]
+
+        gaze = self.feed(feature)
+
+        return gaze
+
+    def loss(self, x_in, label):
+        gaze = self.forward(x_in)
+        loss = self.loss_op(gaze, label)
+        return loss
+

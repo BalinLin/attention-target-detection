@@ -25,6 +25,22 @@ from config import *
 import warnings
 warnings.simplefilter(action='ignore')
 
+def generate_data_field(eye_point, input_size):
+    """eye_point is (x, y) and between 0 and 1"""
+    height = width = input_size
+    x_grid = np.array(range(width)).reshape([1, width]).repeat(height, axis=0)
+    y_grid = np.array(range(height)).reshape([height, 1]).repeat(width, axis=1)
+    grid = np.stack((x_grid, y_grid)).astype(np.float32)
+
+    x, y = eye_point
+    x, y = x * width, y * height
+
+    grid -= np.array([x, y]).reshape([2, 1, 1]).astype(np.float32)
+    norm = np.sqrt(np.sum(grid ** 2, axis=0)).reshape([1, height, width])
+    # avoid zero norm
+    norm = np.maximum(norm, 0.1)
+    grid /= norm
+    return grid
 
 class GazeFollow(Dataset):
     def __init__(self, data_dir, depth_dir, csv_path, transform, input_size=input_resolution, output_size=output_resolution,
@@ -150,6 +166,9 @@ class GazeFollow(Dataset):
                 # if gaze_inside:
                 gaze_x, gaze_y = (gaze_x * width - offset_x) / float(crop_width), \
                                  (gaze_y * height - offset_y) / float(crop_height)
+                eye_x, eye_y =   (eye_x * width - offset_x) / float(crop_width), \
+                                 (eye_y * height - offset_y) / float(crop_height)
+
                 # else:
                 #     gaze_x = -1; gaze_y = -1
 
@@ -164,6 +183,7 @@ class GazeFollow(Dataset):
                 x_max = x_max_2
                 x_min = x_min_2
                 gaze_x = 1 - gaze_x
+                eye_x = 1 - eye_x
 
             # Random color change
             if np.random.random_sample() <= 0.5:
@@ -197,6 +217,7 @@ class GazeFollow(Dataset):
             face_depth = transform_depth(face_depth)
 
         # generate the heat map used for deconv prediction
+        gaze = [gaze_x, gaze_y]
         gaze_heatmap = torch.zeros(self.output_size, self.output_size)  # set the size of the output
         if self.test:  # aggregated heatmap
             # NOTE: torch.max(gaze_heatmap) ~= 0.1
@@ -215,6 +236,10 @@ class GazeFollow(Dataset):
                                                  3,
                                                  type='Gaussian')
 
+        # generate gaze field for fov
+        eye = [eye_x, eye_y]
+        gaze_field = generate_data_field(eye_point = eye, input_size = self.input_size)
+
         if self.imshow:
             fig = plt.figure(111)
             img = 255 - imutils.unnorm(img.numpy()) * 255
@@ -225,9 +250,9 @@ class GazeFollow(Dataset):
             plt.savefig('viz_aug.png')
 
         if self.test:
-            return img, depth, face, face_depth, head_channel, gaze_heatmap, cont_gaze, imsize, path
+            return img, depth, face, face_depth, head_channel, gaze_heatmap, torch.from_numpy(gaze_field), torch.FloatTensor(eye), cont_gaze, imsize, path
         else:
-            return img, depth, face, face_depth, head_channel, gaze_heatmap, path, gaze_inside
+            return img, depth, face, face_depth, head_channel, gaze_heatmap, torch.from_numpy(gaze_field), torch.FloatTensor(eye), torch.FloatTensor(gaze), path, gaze_inside
 
     def __len__(self):
         return self.length
