@@ -246,7 +246,7 @@ def train():
                                 all_distances.append(evaluation.L2_dist(gt_gaze, norm_p))
                                 val_gt_direction_temp = gt_gaze - val_eye
                                 val_angle_loss_temp = torch.mean(1 - cosine_similarity(val_direction, val_gt_direction_temp)) * loss_amp_factor_angle
-                                val_angle_loss = torch.min(val_angle_loss, val_angle_loss_temp)
+                                val_angle_loss = val_angle_loss_temp if val_angle_loss > val_angle_loss_temp else val_angle_loss
                             min_dist.append(min(all_distances))
                             # average distance: distance between the predicted point and human average point
                             mean_gt_gaze = torch.mean(valid_gaze, 0)
