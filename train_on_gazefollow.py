@@ -27,7 +27,7 @@ parser.add_argument("--device", type=int, default=0, help="gpu id")
 # parser.add_argument("--init_weights", type=str, default="initial_weights_for_spatial_training.pt", help="initial weights")
 parser.add_argument("--init_weights", type=str, default="", help="initial weights")
 parser.add_argument("--lr", type=float, default=1e-6, help="learning rate")
-parser.add_argument("--batch_size", type=int, default=48, help="batch size")
+parser.add_argument("--batch_size", type=int, default=12, help="batch size")
 parser.add_argument("--epochs", type=int, default=70, help="number of epochs")
 parser.add_argument("--print_every", type=int, default=100, help="print every ___ iterations")
 parser.add_argument("--eval_every", type=int, default=500, help="evaluate every ___ iterations")
@@ -224,7 +224,7 @@ def train():
                         val_l2_loss = torch.mean(val_l2_loss, dim=1) # (N)
                         val_l2_loss = torch.mean(val_l2_loss, dim=0) # (1)
                             # Angle loss
-                        val_angle_loss = torch.tensor(float('inf'))
+                        val_angle_loss = torch.tensor(float('inf')).cuda().to(device)
 
                         val_gaze_heatmap_pred = val_gaze_heatmap_pred.cpu()
 
