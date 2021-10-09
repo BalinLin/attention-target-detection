@@ -27,7 +27,7 @@ parser.add_argument("--device", type=int, default=0, help="gpu id")
 # parser.add_argument("--init_weights", type=str, default="initial_weights_for_spatial_training.pt", help="initial weights")
 parser.add_argument("--init_weights", type=str, default="", help="initial weights")
 parser.add_argument("--lr", type=float, default=1e-6, help="learning rate")
-parser.add_argument("--batch_size", type=int, default=12, help="batch size")
+parser.add_argument("--batch_size", type=int, default=48, help="batch size")
 parser.add_argument("--epochs", type=int, default=70, help="number of epochs")
 parser.add_argument("--print_every", type=int, default=100, help="print every ___ iterations")
 parser.add_argument("--eval_every", type=int, default=500, help="evaluate every ___ iterations")
@@ -110,7 +110,7 @@ def train():
     # scheduler_multistep increse lr once it meet milestones.
     # scheduler_plateau reduce lr when plateau (loss not reduce).
     scheduler_multistep = lr_scheduler.MultiStepLR(optimizer, milestones=[3,5,10], gamma=5)
-    scheduler_plateau = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, verbose=False)
+    scheduler_plateau = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, min_lr=1e-7, verbose=False)
 
     step = 0
     loss_amp_factor_mse = 10000 # multiplied to the loss to prevent underflow
