@@ -122,8 +122,8 @@ class ModelSpatial(nn.Module):
         # gaze direction
         self.gaze = GazeTR()
 
-        # scene pathway, input size = 7 means Scene Image cat with depth map and Head Position
-        self.conv1_scene = nn.Conv2d(7, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        # scene pathway, input size = 8 means Scene Image cat with fov, depth map and Head Position
+        self.conv1_scene = nn.Conv2d(8, 64, kernel_size=7, stride=2, padding=3, bias=False)
         self.bn1_scene = nn.BatchNorm2d(64)
         self.layer1_scene = self._make_layer_scene(block, 64, layers_scene[0])
         self.layer2_scene = self._make_layer_scene(block, 128, layers_scene[1], stride=2)
@@ -223,11 +223,11 @@ class ModelSpatial(nn.Module):
         # gaze_field.shape -> torch.Size([batch_size, 1, 224, 224])
         # eye.shape -> torch.Size([batch_size, 2])
         # gaze.shape -> torch.Size([batch_size, 2])
-        direction = self.gaze(face) # (N, 3, 224, 224) -> (N, 2)
+        direction = self.gaze(face) # (N, 3, 224, 224) -> (N, 3)
 
         # infer gaze direction and normalized
-        norm = torch.norm(direction, 2, dim=1)
-        normalized_direction = direction / norm.view([-1, 1])
+        norm = torch.norm(direction[:, :2], 2, dim=1)
+        normalized_direction = direction[:, :2] / norm.view([-1, 1])
 
         # generate gaze field map
         batch_size, channel, height, width = gaze_field.size()
@@ -238,15 +238,15 @@ class ModelSpatial(nn.Module):
         gaze_field_map = gaze_field_map.permute([0, 3, 1, 2]).contiguous()
 
         gaze_field_map = self.relu(gaze_field_map)
-        #print gaze_field_map.size()
 
         # mask with gaze_field
         gaze_field_map_2 = torch.pow(gaze_field_map, 3)
         gaze_field_map_3 = torch.pow(gaze_field_map, 5)
         # gaze_field_map_gamma = self.gamma_fov1 * gaze_field_map + self.gamma_fov2 * gaze_field_map_2 + self.gamma_fov3 * gaze_field_map_3
         # images = torch.cat([images, gaze_field_map_gamma], dim=1) # (N, 3, 224, 224) + (N, 1, 224, 224) -> (N, 4, 224, 224)
-        # images = torch.cat([images, gaze_field_map, gaze_field_map_2, gaze_field_map_3], dim=1) # (N, 3, 224, 224) + (N, 3, 224, 224) -> (N, 6, 224, 224)
+        images = torch.cat([images, gaze_field_map, gaze_field_map_2, gaze_field_map_3], dim=1) # (N, 3, 224, 224) + (N, 3, 224, 224) -> (N, 6, 224, 224)
 
+        face_depth = face_depth * direction[:, 2].view([batch_size, -1, 1, 1])
         face = torch.cat((face, face_depth), dim=1) # (N, 3, 224, 224) + (N, 1, 224, 224) -> (N, 4, 224, 224)
         face = self.conv1_face(face)       # (N, 4, 224, 224) -> (N, 64, 112, 112)
         face = self.bn1_face(face)
@@ -270,9 +270,11 @@ class ModelSpatial(nn.Module):
         attn_weights = F.softmax(attn_weights, dim=2) # soft attention weights single-channel, value of attention(dim=2) to be [0-1]
         attn_weights = attn_weights.view(-1, 1, 7, 7) # (N, 1, 7, 7)
 
-        # origin image concat with depth map and haed position (N, 4, 224, 224) + (N, 3, 224, 224) + (N, 1, 224, 224) -> (N, 7, 224, 224)
+        # origin image concat with depth map and haed position (N, 6, 224, 224) + (N, 1, 224, 224) + (N, 1, 224, 224) -> (N, 8, 224, 224)
         # depth_gamma = depth * self.gamma_fovdepthm * gaze_field_map_gamma
-        im = torch.cat((images, depth * gaze_field_map, depth * gaze_field_map_2, depth * gaze_field_map_3), dim=1)
+        # im = torch.cat((images, depth * gaze_field_map, depth * gaze_field_map_2, depth * gaze_field_map_3), dim=1)
+        depth = depth * direction[:, 2].view([batch_size, -1, 1, 1])
+        im = torch.cat((images, depth), dim=1)
         im = torch.cat((im, head), dim=1)
         im = self.conv1_scene(im)           # (N, 8, 224, 224) -> (N, 64, 112, 112)
         im = self.bn1_scene(im)
@@ -600,7 +602,7 @@ class GazeTR(nn.Module):
 
         self.pos_embedding = nn.Embedding(dim_feature+1, maps)
 
-        self.feed = nn.Linear(maps, 2)
+        self.feed = nn.Linear(maps, 3)
 
         self.loss_op = nn.L1Loss()
 

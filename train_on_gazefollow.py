@@ -99,6 +99,7 @@ def train():
     # Loss functions
     # MSE(https://blog.csdn.net/hao5335156/article/details/81029791)
     mse_loss = nn.MSELoss(reduce=False) # not reducing in order to ignore outside cases
+    L1_loss = nn.L1Loss(reduction='mean')
     bcelogit_loss = nn.BCEWithLogitsLoss()
     cosine_similarity = nn.CosineSimilarity()
 
@@ -116,6 +117,7 @@ def train():
     loss_amp_factor_mse = 10000 # multiplied to the loss to prevent underflow
     loss_amp_factor_inout = 100 # multiplied to the loss to prevent underflow
     loss_amp_factor_angle = 100 # multiplied to the loss to prevent underflow
+    loss_amp_factor_depth = 100 # multiplied to the loss to prevent underflow
     w1 = 0.5 # weight for heatmap loss
     w2 = 0.5 # weight for angle loss
     max_steps = len(train_loader)
@@ -137,7 +139,8 @@ def train():
             # gaze_field.shape -> (N, 2, 224, 224)
             # eye.shape -> (N, 2)
             # gaze.shape -> (N, 2)
-        for batch, (img, dep, face, face_dep, head_channel, gaze_heatmap, gaze_field, eye, gaze, name, gaze_inside) in enumerate(train_loader):
+            # relative_depth.shape -> (N, 1)
+        for batch, (img, dep, face, face_dep, head_channel, gaze_heatmap, gaze_field, eye, gaze, name, gaze_inside, relative_depth) in enumerate(train_loader):
             model.train(True) # https://stackoverflow.com/questions/51433378/what-does-model-train-do-in-pytorch
             images = img.cuda().to(device)
             depth = dep.cuda().to(device)
@@ -148,6 +151,7 @@ def train():
             gaze_field = gaze_field.cuda().to(device)
             eye = eye.cuda().to(device)
             gaze = gaze.cuda().to(device)
+            relative_depth = relative_depth.cuda().to(device)
 
             # predict heatmap(N, 1, 64, 64), mean of attention, in/out
             gaze_heatmap_pred, attmap, inout_pred, direction, gaze_field_map = model(images, depth, head, faces, face_depth, gaze_field)
@@ -155,7 +159,7 @@ def train():
 
             # Loss
                 # l2 loss computed only for inside case
-            l2_loss = mse_loss(gaze_heatmap_pred, gaze_heatmap)*loss_amp_factor_mse # (N, 64, 64)
+            l2_loss = mse_loss(gaze_heatmap_pred, gaze_heatmap) * loss_amp_factor_mse # (N, 64, 64)
             l2_loss = torch.mean(l2_loss, dim=1) # (N, 64)
             l2_loss = torch.mean(l2_loss, dim=1) # (N)
             gaze_inside = gaze_inside.cuda(device).to(torch.float)
@@ -165,14 +169,16 @@ def train():
             Xent_loss = bcelogit_loss(inout_pred.squeeze(), gaze_inside.squeeze()) * loss_amp_factor_inout
                 # Angle loss
             gt_direction = gaze - eye
-            angle_loss = torch.mean(1 - cosine_similarity(direction, gt_direction)) * loss_amp_factor_angle
+            angle_loss = torch.mean(1 - cosine_similarity(direction[:, :2], gt_direction)) * loss_amp_factor_angle
+                # depth loss
+            depth_loss = L1_loss(direction[:, 2], relative_depth) * loss_amp_factor_depth
 
             if ep == 0:
-                total_loss = angle_loss
+                total_loss = w2 * angle_loss + w2 * depth_loss
             elif ep >= 7 and ep <= 14:
                 total_loss = l2_loss #+ Xent_loss
             else:
-                total_loss = w1 * l2_loss + w2 * angle_loss #+ Xent_loss
+                total_loss = w1 * l2_loss + w2 * angle_loss + w2 * depth_loss #+ Xent_loss
 
             # NOTE: summed loss is used to train the main model.
             #       l2_loss is used to get SOTA on GazeFollow benchmark.
@@ -219,12 +225,13 @@ def train():
                         val_gaze_heatmap_pred = val_gaze_heatmap_pred.squeeze(1) # (N, 1, 64, 64) -> (N, 64, 64)
                         # Loss
                             # l2 loss computed only for inside case, test set only have inside case.
-                        val_l2_loss = mse_loss(val_gaze_heatmap_pred, val_gaze_heatmap)*loss_amp_factor_mse # (N, 64, 64)
+                        val_l2_loss = mse_loss(val_gaze_heatmap_pred, val_gaze_heatmap) * loss_amp_factor_mse # (N, 64, 64)
                         val_l2_loss = torch.mean(val_l2_loss, dim=1) # (N, 64)
                         val_l2_loss = torch.mean(val_l2_loss, dim=1) # (N)
                         val_l2_loss = torch.mean(val_l2_loss, dim=0) # (1)
                             # Angle loss
                         val_angle_loss = torch.tensor(float('inf')).cuda().to(device)
+                        val_depth_loss = torch.tensor(float('inf')).cuda().to(device)
 
                         val_gaze_heatmap_pred = val_gaze_heatmap_pred.cpu()
 
@@ -245,9 +252,15 @@ def train():
                             for gt_gaze in valid_gaze:
                                 all_distances.append(evaluation.L2_dist(gt_gaze, norm_p))
                                 gt_gaze = gt_gaze.cuda().to(device)
+                                # angle loss
                                 val_gt_direction_temp = gt_gaze - val_eye
-                                val_angle_loss_temp = torch.mean(1 - cosine_similarity(val_direction, val_gt_direction_temp)) * loss_amp_factor_angle
+                                val_angle_loss_temp = torch.mean(1 - cosine_similarity(val_direction[:, :2], val_gt_direction_temp)) * loss_amp_factor_angle
                                 val_angle_loss = val_angle_loss_temp if val_angle_loss > val_angle_loss_temp else val_angle_loss
+                                # depth loss
+                                x, y = int(gt_gaze[0] * input_resolution), int(gt_gaze[1] * input_resolution)
+                                val_relative_depth = val_depth[b_i, 0, x, y]
+                                val_depth_loss_temp = L1_loss(val_direction[:, 2], val_relative_depth) * loss_amp_factor_depth
+                                val_depth_loss = val_depth_loss_temp if val_depth_loss > val_depth_loss_temp else val_depth_loss
                             min_dist.append(min(all_distances))
                             # average distance: distance between the predicted point and human average point
                             mean_gt_gaze = torch.mean(valid_gaze, 0)
@@ -255,11 +268,11 @@ def train():
                             avg_dist.append(avg_distance)
 
                         if ep == 0:
-                            val_total_loss = val_angle_loss
+                            val_total_loss = w2 * val_angle_loss + w2 * val_depth_loss
                         elif ep >= 7 and ep <= 14:
                             val_total_loss = val_l2_loss #+ Xent_loss
                         else:
-                            val_total_loss = w1 * val_l2_loss + w2 * val_angle_loss #+ Xent_loss
+                            val_total_loss = w1 * val_l2_loss + w2 * val_angle_loss + w2 * val_depth_loss #+ Xent_loss
 
                 print("\tAUC:{:.4f}\tmin dist:{:.4f}\tavg dist:{:.4f}".format(
                       torch.mean(torch.tensor(AUC)),

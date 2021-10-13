@@ -133,10 +133,10 @@ class GazeFollow(Dataset):
             # Random Crop
             if np.random.random_sample() <= 0.5:
                 # Calculate the minimum valid range of the crop that doesn't exclude the face and the gaze target
-                crop_x_min = np.min([gaze_x * width, x_min, x_max])
-                crop_y_min = np.min([gaze_y * height, y_min, y_max])
-                crop_x_max = np.max([gaze_x * width, x_min, x_max])
-                crop_y_max = np.max([gaze_y * height, y_min, y_max])
+                crop_x_min = np.min([gaze_x * width, eye_x * width, x_min, x_max])
+                crop_y_min = np.min([gaze_y * height, eye_y * height, y_min, y_max])
+                crop_x_max = np.max([gaze_x * width, eye_x * width, x_min, x_max])
+                crop_y_max = np.max([gaze_y * height, eye_y * height, y_min, y_max])
 
                 # Randomly select a random top left corner
                 if crop_x_min >= 0:
@@ -210,11 +210,16 @@ class GazeFollow(Dataset):
             transform_list.append(transforms.Resize((input_resolution, input_resolution)))
             transform_list.append(transforms.ToTensor())
             transform_depth = transforms.Compose(transform_list)
+            x, y = int(eye_x * self.input_size), int(eye_y * self.input_size)
 
             img = self.transform(img)
             depth = transform_depth(depth)
+            head_depth = depth[0, x, y]
+            depth = depth - head_depth # rebased
+
             face = self.transform(face)
             face_depth = transform_depth(face_depth)
+            face_depth = face_depth - head_depth # rebased
 
         # generate the heat map used for deconv prediction
         gaze = [gaze_x, gaze_y]
@@ -252,7 +257,9 @@ class GazeFollow(Dataset):
         if self.test:
             return img, depth, face, face_depth, head_channel, gaze_heatmap, torch.from_numpy(gaze_field), torch.FloatTensor(eye), cont_gaze, imsize, path
         else:
-            return img, depth, face, face_depth, head_channel, gaze_heatmap, torch.from_numpy(gaze_field), torch.FloatTensor(eye), torch.FloatTensor(gaze), path, gaze_inside
+            x, y = int(gaze[0] * self.input_size), int(gaze[1] * self.input_size)
+            relative_depth = depth[0, x, y]
+            return img, depth, face, face_depth, head_channel, gaze_heatmap, torch.from_numpy(gaze_field), torch.FloatTensor(eye), torch.FloatTensor(gaze), path, gaze_inside, relative_depth
 
     def __len__(self):
         return self.length
