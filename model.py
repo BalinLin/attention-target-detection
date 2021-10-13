@@ -114,16 +114,16 @@ class ModelSpatial(nn.Module):
         self.avgpool = nn.AvgPool2d(7, stride=1)
 
         # learnable weight
-        self.gamma_fov1 = nn.Parameter(torch.zeros(1))
-        self.gamma_fov2 = nn.Parameter(torch.zeros(1))
-        self.gamma_fov3 = nn.Parameter(torch.zeros(1))
+        # self.gamma_fov1 = nn.Parameter(torch.zeros(1))
+        # self.gamma_fov2 = nn.Parameter(torch.zeros(1))
+        # self.gamma_fov3 = nn.Parameter(torch.zeros(1))
         # self.gamma_fovdepth = nn.Parameter(torch.zeros(1))
 
         # gaze direction
         self.gaze = GazeTR()
 
-        # scene pathway, input size = 8 means Scene Image cat with depth map and Head Position
-        self.conv1_scene = nn.Conv2d(6, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        # scene pathway, input size = 7 means Scene Image cat with depth map and Head Position
+        self.conv1_scene = nn.Conv2d(7, 64, kernel_size=7, stride=2, padding=3, bias=False)
         self.bn1_scene = nn.BatchNorm2d(64)
         self.layer1_scene = self._make_layer_scene(block, 64, layers_scene[0])
         self.layer2_scene = self._make_layer_scene(block, 128, layers_scene[1], stride=2)
@@ -243,8 +243,9 @@ class ModelSpatial(nn.Module):
         # mask with gaze_field
         gaze_field_map_2 = torch.pow(gaze_field_map, 3)
         gaze_field_map_3 = torch.pow(gaze_field_map, 5)
-        gaze_field_map_gamma = self.gamma_fov1 * gaze_field_map + self.gamma_fov2 * gaze_field_map_2 + self.gamma_fov3 * gaze_field_map_3
-        images = torch.cat([images, gaze_field_map_gamma], dim=1) # (N, 3, 224, 224) + (N, 1, 224, 224) -> (N, 4, 224, 224)
+        # gaze_field_map_gamma = self.gamma_fov1 * gaze_field_map + self.gamma_fov2 * gaze_field_map_2 + self.gamma_fov3 * gaze_field_map_3
+        # images = torch.cat([images, gaze_field_map_gamma], dim=1) # (N, 3, 224, 224) + (N, 1, 224, 224) -> (N, 4, 224, 224)
+        # images = torch.cat([images, gaze_field_map, gaze_field_map_2, gaze_field_map_3], dim=1) # (N, 3, 224, 224) + (N, 3, 224, 224) -> (N, 6, 224, 224)
 
         face = torch.cat((face, face_depth), dim=1) # (N, 3, 224, 224) + (N, 1, 224, 224) -> (N, 4, 224, 224)
         face = self.conv1_face(face)       # (N, 4, 224, 224) -> (N, 64, 112, 112)
@@ -269,9 +270,9 @@ class ModelSpatial(nn.Module):
         attn_weights = F.softmax(attn_weights, dim=2) # soft attention weights single-channel, value of attention(dim=2) to be [0-1]
         attn_weights = attn_weights.view(-1, 1, 7, 7) # (N, 1, 7, 7)
 
-        # origin image concat with depth map and haed position (N, 4, 224, 224) + (N, 1, 224, 224) + (N, 1, 224, 224) -> (N, 6, 224, 224)
+        # origin image concat with depth map and haed position (N, 4, 224, 224) + (N, 3, 224, 224) + (N, 1, 224, 224) -> (N, 7, 224, 224)
         # depth_gamma = depth * self.gamma_fovdepthm * gaze_field_map_gamma
-        im = torch.cat((images, depth), dim=1)
+        im = torch.cat((images, depth * gaze_field_map, depth * gaze_field_map_2, depth * gaze_field_map_3), dim=1)
         im = torch.cat((im, head), dim=1)
         im = self.conv1_scene(im)           # (N, 8, 224, 224) -> (N, 64, 112, 112)
         im = self.bn1_scene(im)
