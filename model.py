@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from torchvision import utils
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pack_padded_sequence, PackedSequence
 import math
@@ -223,6 +224,12 @@ class ModelSpatial(nn.Module):
         # gaze_field.shape -> torch.Size([batch_size, 1, 224, 224])
         # eye.shape -> torch.Size([batch_size, 2])
         # gaze.shape -> torch.Size([batch_size, 2])
+
+        # get front, mid and back depth map by value
+        front = torch.clamp(depth, min=0, max=1)
+        mid = torch.clamp(depth, min=-0.1, max=0.1)
+        back = torch.clamp(depth, min=-1, max=0)
+
         direction = self.gaze(face) # (N, 3, 224, 224) -> (N, 3)
 
         # infer gaze direction and normalized
@@ -246,7 +253,7 @@ class ModelSpatial(nn.Module):
         # images = torch.cat([images, gaze_field_map_gamma], dim=1) # (N, 3, 224, 224) + (N, 1, 224, 224) -> (N, 4, 224, 224)
         images = torch.cat([images, gaze_field_map, gaze_field_map_2, gaze_field_map_3], dim=1) # (N, 3, 224, 224) + (N, 3, 224, 224) -> (N, 6, 224, 224)
 
-        face_depth = face_depth * direction[:, 2].view([batch_size, -1, 1, 1])
+        # face_depth = face_depth * direction[:, 2].view([batch_size, -1, 1, 1])
         face = torch.cat((face, face_depth), dim=1) # (N, 3, 224, 224) + (N, 1, 224, 224) -> (N, 4, 224, 224)
         face = self.conv1_face(face)       # (N, 4, 224, 224) -> (N, 64, 112, 112)
         face = self.bn1_face(face)
@@ -273,7 +280,15 @@ class ModelSpatial(nn.Module):
         # origin image concat with depth map and haed position (N, 6, 224, 224) + (N, 1, 224, 224) + (N, 1, 224, 224) -> (N, 8, 224, 224)
         # depth_gamma = depth * self.gamma_fovdepthm * gaze_field_map_gamma
         # im = torch.cat((images, depth * gaze_field_map, depth * gaze_field_map_2, depth * gaze_field_map_3), dim=1)
-        depth = depth * direction[:, 2].view([batch_size, -1, 1, 1])
+        # depth = depth * direction[:, 2].view([batch_size, -1, 1, 1])
+        for idx in range(batch_size):
+            if direction[idx, 2] > 0.3:
+                depth[idx] = front[idx]
+            elif direction[idx, 2] < -0.3:
+                depth[idx] = back[idx]
+            else:
+                depth[idx] = mid[idx]
+
         im = torch.cat((images, depth), dim=1)
         im = torch.cat((im, head), dim=1)
         im = self.conv1_scene(im)           # (N, 8, 224, 224) -> (N, 64, 112, 112)

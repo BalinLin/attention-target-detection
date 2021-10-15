@@ -1,6 +1,6 @@
 import torch
 from torch.utils.data.dataset import Dataset
-from torchvision import transforms
+from torchvision import transforms, utils
 import torchvision.transforms.functional as TF
 
 import numpy as np
@@ -113,6 +113,13 @@ class GazeFollow(Dataset):
         width, height = img.size
         x_min, y_min, x_max, y_max = map(float, [x_min, y_min, x_max, y_max]) # map type to float
 
+        # get eye and gaze depth for rebasing depth
+        depth_eye_x, depth_eye_y = int(eye_x * width), int(eye_y * height)
+        head_depth = depth.getpixel((depth_eye_x, depth_eye_y)) / 256
+
+        depth_gaze_x, depth_gaze_y = int(gaze_x * width), int(gaze_y * height)
+        relative_depth = depth.getpixel((depth_gaze_x, depth_gaze_y)) / 256 - head_depth
+
         if self.imshow:
             img.save("origin_img.jpg")
             depth.save("origin_depth.jpg")
@@ -210,14 +217,13 @@ class GazeFollow(Dataset):
             transform_list.append(transforms.Resize((input_resolution, input_resolution)))
             transform_list.append(transforms.ToTensor())
             transform_depth = transforms.Compose(transform_list)
-            x, y = int(eye_x * self.input_size), int(eye_y * self.input_size)
 
             img = self.transform(img)
+            face = self.transform(face)
+
             depth = transform_depth(depth)
-            head_depth = depth[0, x, y]
             depth = depth - head_depth # rebased
 
-            face = self.transform(face)
             face_depth = transform_depth(face_depth)
             face_depth = face_depth - head_depth # rebased
 
@@ -257,8 +263,6 @@ class GazeFollow(Dataset):
         if self.test:
             return img, depth, face, face_depth, head_channel, gaze_heatmap, torch.from_numpy(gaze_field), torch.FloatTensor(eye), cont_gaze, imsize, path
         else:
-            x, y = int(gaze[0] * self.input_size), int(gaze[1] * self.input_size)
-            relative_depth = depth[0, x, y]
             return img, depth, face, face_depth, head_channel, gaze_heatmap, torch.from_numpy(gaze_field), torch.FloatTensor(eye), torch.FloatTensor(gaze), path, gaze_inside, relative_depth
 
     def __len__(self):
