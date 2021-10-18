@@ -225,11 +225,6 @@ class ModelSpatial(nn.Module):
         # eye.shape -> torch.Size([batch_size, 2])
         # gaze.shape -> torch.Size([batch_size, 2])
 
-        # get front, mid and back depth map by value
-        front = torch.clamp(depth, min=0, max=1)
-        mid = torch.clamp(depth, min=-0.1, max=0.1)
-        back = torch.clamp(depth, min=-1, max=0)
-
         direction = self.gaze(face) # (N, 3, 224, 224) -> (N, 3)
 
         # infer gaze direction and normalized
@@ -281,13 +276,18 @@ class ModelSpatial(nn.Module):
         # depth_gamma = depth * self.gamma_fovdepthm * gaze_field_map_gamma
         # im = torch.cat((images, depth * gaze_field_map, depth * gaze_field_map_2, depth * gaze_field_map_3), dim=1)
         # depth = depth * direction[:, 2].view([batch_size, -1, 1, 1])
+            # get front, mid and back depth map by value
         for idx in range(batch_size):
             if direction[idx, 2] > 0.3:
-                depth[idx] = front[idx]
+                front = torch.clamp(depth[idx], min=0, max=1)
+                depth[idx] = front
             elif direction[idx, 2] < -0.3:
-                depth[idx] = back[idx]
+                back = torch.clamp(depth[idx], min=-1, max=0)
+                depth[idx] = -back
             else:
-                depth[idx] = mid[idx]
+                mid = 1 - 16 * torch.pow(depth[idx], 2)
+                mid = torch.clamp(mid, min=0, max=1)
+                depth[idx] = mid
 
         im = torch.cat((images, depth), dim=1)
         im = torch.cat((im, head), dim=1)

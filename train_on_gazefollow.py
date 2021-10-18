@@ -112,6 +112,8 @@ def train():
     # scheduler_plateau reduce lr when plateau (loss not reduce).
     scheduler_multistep = lr_scheduler.MultiStepLR(optimizer, milestones=[3,5,10], gamma=5)
     scheduler_plateau = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, min_lr=1e-7, verbose=False)
+    # scheduler_multistep = lr_scheduler.MultiStepLR(optimizer, milestones=[1,3,5,7,9,10], gamma=2)
+    # scheduler_plateau = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.8, patience=5, min_lr=1e-7, verbose=False)
 
     step = 0
     loss_amp_factor_mse = 10000 # multiplied to the loss to prevent underflow
