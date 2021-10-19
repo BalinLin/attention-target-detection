@@ -223,7 +223,7 @@ def train():
                         val_eye = val_eye.to(device)
 
                         # predict heatmap(N, 1, 64, 64), mean of attention, in/out
-                        val_gaze_heatmap_pred, val_attmap, val_inout_pred, val_direction, val_gaze_field_map = model(val_images, val_depth, val_head, val_faces, val_face_depth, val_gaze_field)
+                        val_gaze_heatmap_pred, val_attmap, val_inout_pred, val_direction, val_gaze_field_map = model(val_images, val_depth, val_head, val_faces, val_face_depth, val_gaze_field, device)
                         val_gaze_heatmap_pred = val_gaze_heatmap_pred.squeeze(1) # (N, 1, 64, 64) -> (N, 64, 64)
                         # Loss
                             # l2 loss computed only for inside case, test set only have inside case.
