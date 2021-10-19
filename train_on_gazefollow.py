@@ -102,7 +102,6 @@ def train():
     angle_heatmap_loss = nn.MSELoss()
     L1_loss = nn.L1Loss(reduction='mean')
     bcelogit_loss = nn.BCEWithLogitsLoss()
-    cosine_similarity = nn.CosineSimilarity()
 
     # Optimizer
     # optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
@@ -169,10 +168,7 @@ def train():
             gt_direction = gaze - eye
                 # generate angle heatmap
             angle_heatmap_pred, angle_heatmap = imutils.generate_angle_heatmap(direction, gt_direction, args.batch_size, angle_heatmap_width, angle_heatmap_heigh)
-            angle_loss = (
-                            torch.mean(1 - cosine_similarity(direction, gt_direction)) +
-                            angle_heatmap_loss(angle_heatmap_pred, angle_heatmap) * loss_amp_factor_mse / loss_amp_factor_angle
-                         ) / 2 * loss_amp_factor_angle
+            angle_loss = angle_heatmap_loss(angle_heatmap_pred, angle_heatmap) * loss_amp_factor_mse
             if ep == 0:
                 total_loss = angle_loss
             elif ep >= 7 and ep <= 14:
@@ -253,10 +249,7 @@ def train():
                                 gt_gaze = gt_gaze.to(device)
                                 val_gt_direction_temp = gt_gaze - val_eye
                                 val_angle_heatmap_pred, val_angle_heatmap = imutils.generate_angle_heatmap(val_direction, val_gt_direction_temp, args.batch_size, angle_heatmap_width, angle_heatmap_heigh)
-                                val_angle_loss_temp = (
-                                                        torch.mean(1 - cosine_similarity(val_direction, val_gt_direction_temp)) +
-                                                        angle_heatmap_loss(val_angle_heatmap_pred, val_angle_heatmap) * loss_amp_factor_mse / loss_amp_factor_angle
-                                                      ) / 2 * loss_amp_factor_angle
+                                val_angle_loss_temp = angle_heatmap_loss(val_angle_heatmap_pred, val_angle_heatmap) * loss_amp_factor_mse
                                 val_angle_loss = val_angle_loss_temp if val_angle_loss > val_angle_loss_temp else val_angle_loss
                             min_dist.append(min(all_distances))
                             # average distance: distance between the predicted point and human average point
