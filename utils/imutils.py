@@ -77,3 +77,22 @@ def multi_hot_targets(gaze_pts, out_res):
             y = min(y, h-1)
             target_map[y, x] = 1
     return target_map
+
+def generate_angle_heatmap(pre_direction, direction, batch, angle_heatmap_width, angle_heatmap_heigh):
+    pred_angle_heatmap = torch.zeros(batch, 1, angle_heatmap_width, angle_heatmap_heigh)  # set the size of the output
+    angle_heatmap = torch.zeros(batch, 1, angle_heatmap_width, angle_heatmap_heigh)  # set the size of the output
+    gamma = 10
+
+    for i in range(batch):
+        pre_gaze_x, pre_gaze_y = pre_direction[i, 0], pre_direction[i, 1]
+        pre_direction_x, pre_direction_y = pre_gaze_x + 1, pre_gaze_y + 1 # [-1 ~ 1] to [0 ~ 2]
+        pre_gaze_heatmap = torch.zeros(angle_heatmap_width, angle_heatmap_heigh)  # set the size of the output
+        pred_angle_heatmap[i, 0, :] = draw_labelmap(pre_gaze_heatmap, [int(pre_direction_x * angle_heatmap_width / 2), int(pre_direction_y * angle_heatmap_heigh / 2)], gamma, type='Gaussian')
+        
+        gaze_x, gaze_y = direction[i, 0], direction[i, 1]
+        direction_x, direction_y = gaze_x + 1, gaze_y + 1 # [-1 ~ 1] to [0 ~ 2]
+        gaze_heatmap = torch.zeros(angle_heatmap_width, angle_heatmap_heigh)  # set the size of the output
+        angle_heatmap[i, 0, :] = draw_labelmap(gaze_heatmap, [int(direction_x * angle_heatmap_width / 2), int(direction_y * angle_heatmap_heigh / 2)], gamma, type='Gaussian')
+
+
+    return pred_angle_heatmap, angle_heatmap

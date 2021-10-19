@@ -99,6 +99,7 @@ def train():
     # Loss functions
     # MSE(https://blog.csdn.net/hao5335156/article/details/81029791)
     mse_loss = nn.MSELoss(reduce=False) # not reducing in order to ignore outside cases
+    angle_heatmap_loss = nn.MSELoss()
     L1_loss = nn.L1Loss(reduction='mean')
     bcelogit_loss = nn.BCEWithLogitsLoss()
     cosine_similarity = nn.CosineSimilarity()
@@ -166,8 +167,12 @@ def train():
             Xent_loss = bcelogit_loss(inout_pred.squeeze(), gaze_inside.squeeze()) * loss_amp_factor_inout
                 # Angle loss
             gt_direction = gaze - eye
-            angle_loss = (torch.mean(1 - cosine_similarity(direction, gt_direction)) +
-                          L1_loss(direction, gt_direction) ) / 2 * loss_amp_factor_angle
+                # generate angle heatmap
+            angle_heatmap_pred, angle_heatmap = imutils.generate_angle_heatmap(direction, gt_direction, args.batch_size, angle_heatmap_width, angle_heatmap_heigh)
+            angle_loss = (
+                            torch.mean(1 - cosine_similarity(direction, gt_direction)) +
+                            angle_heatmap_loss(angle_heatmap_pred, angle_heatmap) * loss_amp_factor_mse / loss_amp_factor_angle
+                         ) / 2 * loss_amp_factor_angle
             if ep == 0:
                 total_loss = angle_loss
             elif ep >= 7 and ep <= 14:
@@ -247,8 +252,11 @@ def train():
                                 all_distances.append(evaluation.L2_dist(gt_gaze, norm_p))
                                 gt_gaze = gt_gaze.to(device)
                                 val_gt_direction_temp = gt_gaze - val_eye
-                                val_angle_loss_temp = (torch.mean(1 - cosine_similarity(val_direction, val_gt_direction_temp)) +
-                                                       L1_loss(val_direction, val_gt_direction_temp) ) / 2 * loss_amp_factor_angle
+                                val_angle_heatmap_pred, val_angle_heatmap = imutils.generate_angle_heatmap(val_direction, val_gt_direction_temp, args.batch_size, angle_heatmap_width, angle_heatmap_heigh)
+                                val_angle_loss_temp = (
+                                                        torch.mean(1 - cosine_similarity(val_direction, val_gt_direction_temp)) +
+                                                        angle_heatmap_loss(val_angle_heatmap_pred, val_angle_heatmap) * loss_amp_factor_mse / loss_amp_factor_angle
+                                                      ) / 2 * loss_amp_factor_angle
                                 val_angle_loss = val_angle_loss_temp if val_angle_loss > val_angle_loss_temp else val_angle_loss
                             min_dist.append(min(all_distances))
                             # average distance: distance between the predicted point and human average point
