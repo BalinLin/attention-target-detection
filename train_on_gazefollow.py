@@ -4,7 +4,7 @@ from torchvision import transforms
 import torch.nn as nn
 from torch.optim import lr_scheduler
 import wandb
-
+from torch.autograd import Variable
 from model import ModelSpatial
 from dataset import GazeFollow
 from config import *
@@ -168,7 +168,9 @@ def train():
             gt_direction = gaze - eye
                 # generate angle heatmap
             angle_heatmap_pred, angle_heatmap = imutils.generate_angle_heatmap(direction, gt_direction, args.batch_size, angle_heatmap_width, angle_heatmap_heigh)
-            angle_loss = angle_heatmap_loss(angle_heatmap_pred, angle_heatmap) * loss_amp_factor_mse
+            angle_loss = angle_heatmap_loss(angle_heatmap_pred.to(device), angle_heatmap.to(device)) * loss_amp_factor_mse
+            angle_loss = Variable(angle_loss, requires_grad=True)
+
             if ep == 0:
                 total_loss = angle_loss
             elif ep >= 7 and ep <= 14:
@@ -249,7 +251,8 @@ def train():
                                 gt_gaze = gt_gaze.to(device)
                                 val_gt_direction_temp = gt_gaze - val_eye
                                 val_angle_heatmap_pred, val_angle_heatmap = imutils.generate_angle_heatmap(val_direction, val_gt_direction_temp, args.batch_size, angle_heatmap_width, angle_heatmap_heigh)
-                                val_angle_loss_temp = angle_heatmap_loss(val_angle_heatmap_pred, val_angle_heatmap) * loss_amp_factor_mse
+                                val_angle_loss_temp = angle_heatmap_loss(val_angle_heatmap_pred.to(device), val_angle_heatmap.to(device)) * loss_amp_factor_mse
+                                val_angle_loss_temp = Variable(val_angle_loss_temp, requires_grad=True)
                                 val_angle_loss = val_angle_loss_temp if val_angle_loss > val_angle_loss_temp else val_angle_loss
                             min_dist.append(min(all_distances))
                             # average distance: distance between the predicted point and human average point
