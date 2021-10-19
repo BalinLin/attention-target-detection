@@ -217,7 +217,7 @@ class ModelSpatial(nn.Module):
         # gaze_field.shape -> torch.Size([batch_size, 1, 224, 224])
         # eye.shape -> torch.Size([batch_size, 2])
         # gaze.shape -> torch.Size([batch_size, 2])
-        direction = self.gaze(face) # (N, 3, 224, 224) -> (N, 2)
+        direction = self.gaze(face, device) # (N, 3, 224, 224) -> (N, 2)
 
         # infer gaze direction and normalized
         norm = torch.norm(direction, 2, dim=1)
@@ -596,7 +596,7 @@ class GazeTR(nn.Module):
         self.loss_op = nn.L1Loss()
 
 
-    def forward(self, x_in):
+    def forward(self, x_in, device):
         feature = self.base_model(x_in)
         batch_size = feature.size(0)
         feature = feature.flatten(2)
@@ -605,7 +605,7 @@ class GazeTR(nn.Module):
         cls = self.cls_token.repeat( (1, batch_size, 1))
         feature = torch.cat([cls, feature], 0)
 
-        position = torch.from_numpy(np.arange(0, 50)).cuda()
+        position = torch.from_numpy(np.arange(0, 50)).to(device)
 
         pos_feature = self.pos_embedding(position)
 
