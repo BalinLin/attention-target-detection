@@ -207,7 +207,7 @@ class ModelSpatial(nn.Module):
         return nn.Sequential(*layers)
 
 
-    def forward(self, images, depth, head, face, face_depth, gaze_field):
+    def forward(self, images, depth, head, face, face_depth, gaze_field, device):
         ### images -> whole image(Scene Image), head -> position image(Head Position), face -> head image(Cropped Head)
         # images.shape -> torch.Size([batch_size, 3, 224, 224]),
         # depth.shape -> torch.Size([batch_size, 1, 224, 224]),
