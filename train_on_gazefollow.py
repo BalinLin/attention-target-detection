@@ -167,8 +167,7 @@ def train():
                 # Angle loss
             gt_direction = gaze - eye
             angle_loss = (torch.mean(1 - cosine_similarity(direction, gt_direction)) +
-                          L1_loss(direction[:, 0], gt_direction[:, 0]) +
-                          L1_loss(direction[:, 1], gt_direction[:, 1]) ) / 3 * loss_amp_factor_angle
+                          L1_loss(direction, gt_direction) ) / 2 * loss_amp_factor_angle
             if ep == 0:
                 total_loss = angle_loss
             elif ep >= 7 and ep <= 14:
@@ -249,8 +248,7 @@ def train():
                                 gt_gaze = gt_gaze.cuda().to(device)
                                 val_gt_direction_temp = gt_gaze - val_eye
                                 val_angle_loss_temp = (torch.mean(1 - cosine_similarity(val_direction, val_gt_direction_temp)) +
-                                                       L1_loss(val_direction[:, 0], val_gt_direction_temp[:, 0]) +
-                                                       L1_loss(val_direction[:, 1], val_gt_direction_temp[:, 1]) ) / 3 * loss_amp_factor_angle
+                                                       L1_loss(val_direction, val_gt_direction_temp) ) / 2 * loss_amp_factor_angle
                                 val_angle_loss = val_angle_loss_temp if val_angle_loss > val_angle_loss_temp else val_angle_loss
                             min_dist.append(min(all_distances))
                             # average distance: distance between the predicted point and human average point
