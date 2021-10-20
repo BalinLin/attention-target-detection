@@ -228,7 +228,6 @@ class GazeFollow(Dataset):
             for gaze_x, gaze_y in cont_gaze:
                 if gaze_x != -1:
                     direction_x, direction_y = (gaze_x - eye_x) + 1, (gaze_y - eye_y) + 1 # [-1 ~ 1] to [0 ~ 2]
-                    angle_heatmap = draw_labelmap(gaze_heatmap, [int(direction_x * angle_heatmap_width / 2), int(direction_y * angle_heatmap_heigh / 2)], gamma, type='Gaussian')
                     num_valid += 1
                     gaze_heatmap = imutils.draw_labelmap(gaze_heatmap, [gaze_x * self.output_size, gaze_y * self.output_size],
                                                          3,
