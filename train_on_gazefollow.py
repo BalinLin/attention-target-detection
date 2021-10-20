@@ -27,7 +27,7 @@ parser.add_argument("--device", type=int, default=0, help="gpu id")
 # parser.add_argument("--init_weights", type=str, default="initial_weights_for_spatial_training.pt", help="initial weights")
 parser.add_argument("--init_weights", type=str, default="", help="initial weights")
 parser.add_argument("--lr", type=float, default=1e-6, help="learning rate")
-parser.add_argument("--batch_size", type=int, default=24, help="batch size")
+parser.add_argument("--batch_size", type=int, default=20, help="batch size")
 parser.add_argument("--epochs", type=int, default=70, help="number of epochs")
 parser.add_argument("--print_every", type=int, default=100, help="print every ___ iterations")
 parser.add_argument("--eval_every", type=int, default=500, help="evaluate every ___ iterations")
@@ -167,8 +167,9 @@ def train():
                 # Angle loss
             gt_direction = gaze - eye
                 # generate angle heatmap
-            angle_heatmap_pred, angle_heatmap = imutils.generate_angle_heatmap(direction, gt_direction, args.batch_size, angle_heatmap_width, angle_heatmap_heigh)
-            angle_loss = angle_heatmap_loss(angle_heatmap_pred.to(device), angle_heatmap.to(device)) * loss_amp_factor_mse
+            angle_heatmap_pred = imutils.generate_angle_heatmap(direction, args.batch_size, angle_heatmap_width, angle_heatmap_heigh).to(device)
+            angle_heatmap = imutils.generate_angle_heatmap(gt_direction, args.batch_size, angle_heatmap_width, angle_heatmap_heigh).to(device)
+            angle_loss = angle_heatmap_loss(angle_heatmap_pred, angle_heatmap) * loss_amp_factor_mse
             angle_loss = Variable(angle_loss, requires_grad=True)
 
             if ep == 0:
@@ -208,13 +209,14 @@ def train():
                         # gaze_field.shape -> (N, 2, 224, 224)
                         # eye.shape -> (N, 2)
                         # cont_gaze -> (N, 20, 2)
-                    for val_batch, (val_img, val_dep, val_face, val_face_dep, val_head_channel, val_gaze_heatmap, val_gaze_field, val_eye, cont_gaze, imsize, _) in enumerate(val_loader):
+                    for val_batch, (val_img, val_dep, val_face, val_face_dep, val_head_channel, val_gaze_heatmap, val_gaze_field, val_eye, cont_gaze, val_angle_heatmap, imsize, _) in enumerate(val_loader):
                         val_images = val_img.to(device)
                         val_depth = val_dep.to(device)
                         val_faces = val_face.to(device)
                         val_face_depth = val_face_dep.to(device)
                         val_head = val_head_channel.to(device)
                         val_gaze_heatmap = val_gaze_heatmap.to(device)
+                        val_angle_heatmap = val_angle_heatmap.to(device)
                         val_gaze_field = val_gaze_field.to(device)
                         val_eye = val_eye.to(device)
 
@@ -228,7 +230,8 @@ def train():
                         val_l2_loss = torch.mean(val_l2_loss, dim=1) # (N)
                         val_l2_loss = torch.mean(val_l2_loss, dim=0) # (1)
                             # Angle loss
-                        val_angle_loss = torch.tensor(float('inf')).to(device)
+                        val_angle_heatmap_pred = imutils.generate_angle_heatmap(val_direction, args.batch_size, angle_heatmap_width, angle_heatmap_heigh).to(device)
+                        val_angle_loss = angle_heatmap_loss(val_angle_heatmap_pred, val_angle_heatmap) * loss_amp_factor_mse
 
                         val_gaze_heatmap_pred = val_gaze_heatmap_pred.cpu()
 
@@ -248,12 +251,6 @@ def train():
                             all_distances = []
                             for gt_gaze in valid_gaze:
                                 all_distances.append(evaluation.L2_dist(gt_gaze, norm_p))
-                                gt_gaze = gt_gaze.to(device)
-                                val_gt_direction_temp = gt_gaze - val_eye
-                                val_angle_heatmap_pred, val_angle_heatmap = imutils.generate_angle_heatmap(val_direction, val_gt_direction_temp, args.batch_size, angle_heatmap_width, angle_heatmap_heigh)
-                                val_angle_loss_temp = angle_heatmap_loss(val_angle_heatmap_pred.to(device), val_angle_heatmap.to(device)) * loss_amp_factor_mse
-                                val_angle_loss_temp = Variable(val_angle_loss_temp, requires_grad=True)
-                                val_angle_loss = val_angle_loss_temp if val_angle_loss > val_angle_loss_temp else val_angle_loss
                             min_dist.append(min(all_distances))
                             # average distance: distance between the predicted point and human average point
                             mean_gt_gaze = torch.mean(valid_gaze, 0)

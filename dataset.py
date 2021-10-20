@@ -44,7 +44,7 @@ def generate_data_field(eye_point, input_size):
 
 class GazeFollow(Dataset):
     def __init__(self, data_dir, depth_dir, csv_path, transform, input_size=input_resolution, output_size=output_resolution,
-                 test=False, imshow=False):
+                 angle_heatmap_width_size=angle_heatmap_width, angle_heatmap_heigh_size=angle_heatmap_heigh, test=False, imshow=False):
         if test:
             column_names = ['path', 'idx', 'body_bbox_x', 'body_bbox_y', 'body_bbox_w', 'body_bbox_h', 'eye_x', 'eye_y',
                             'gaze_x', 'gaze_y', 'bbox_x_min', 'bbox_y_min', 'bbox_x_max', 'bbox_y_max', 'meta']
@@ -73,6 +73,8 @@ class GazeFollow(Dataset):
 
         self.input_size = input_size
         self.output_size = output_size
+        self.angle_heatmap_width = angle_heatmap_width_size
+        self.angle_heatmap_heigh = angle_heatmap_heigh_size
         self.imshow = imshow
 
     def __getitem__(self, index):
@@ -219,16 +221,23 @@ class GazeFollow(Dataset):
         # generate the heat map used for deconv prediction
         gaze = [gaze_x, gaze_y]
         gaze_heatmap = torch.zeros(self.output_size, self.output_size)  # set the size of the output
+        angle_heatmap = torch.zeros(self.angle_heatmap_width, self.angle_heatmap_heigh)  # set the size of the output
         if self.test:  # aggregated heatmap
             # NOTE: torch.max(gaze_heatmap) ~= 0.1
             num_valid = 0
             for gaze_x, gaze_y in cont_gaze:
                 if gaze_x != -1:
+                    direction_x, direction_y = (gaze_x - eye_x) + 1, (gaze_y - eye_y) + 1 # [-1 ~ 1] to [0 ~ 2]
+                    angle_heatmap = draw_labelmap(gaze_heatmap, [int(direction_x * angle_heatmap_width / 2), int(direction_y * angle_heatmap_heigh / 2)], gamma, type='Gaussian')
                     num_valid += 1
                     gaze_heatmap = imutils.draw_labelmap(gaze_heatmap, [gaze_x * self.output_size, gaze_y * self.output_size],
                                                          3,
                                                          type='Gaussian')
+                    angle_heatmap = imutils.draw_labelmap(angle_heatmap, [int(direction_x * angle_heatmap_width / 2), int(direction_y * angle_heatmap_heigh / 2)],
+                                                         10,
+                                                         type='Gaussian')
             gaze_heatmap /= num_valid
+            angle_heatmap /= num_valid
         else:
             # NOTE: torch.max(gaze_heatmap) = 1
             # if gaze_inside:
@@ -250,7 +259,7 @@ class GazeFollow(Dataset):
             plt.savefig('viz_aug.png')
 
         if self.test:
-            return img, depth, face, face_depth, head_channel, gaze_heatmap, torch.from_numpy(gaze_field), torch.FloatTensor(eye), cont_gaze, imsize, path
+            return img, depth, face, face_depth, head_channel, gaze_heatmap, torch.from_numpy(gaze_field), torch.FloatTensor(eye), cont_gaze, angle_heatmap, imsize, path
         else:
             return img, depth, face, face_depth, head_channel, gaze_heatmap, torch.from_numpy(gaze_field), torch.FloatTensor(eye), torch.FloatTensor(gaze), path, gaze_inside
 
