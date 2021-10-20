@@ -102,6 +102,7 @@ def train():
     angle_heatmap_loss = nn.MSELoss()
     L1_loss = nn.L1Loss(reduction='mean')
     bcelogit_loss = nn.BCEWithLogitsLoss()
+    cosine_similarity = nn.CosineSimilarity()
 
     # Optimizer
     # optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
@@ -149,6 +150,7 @@ def train():
             gaze_field = gaze_field.to(device)
             eye = eye.to(device)
             gaze = gaze.to(device)
+            batchsize = img.size(0)
 
             # predict heatmap(N, 1, 64, 64), mean of attention, in/out
             gaze_heatmap_pred, attmap, inout_pred, direction, gaze_field_map = model(images, depth, head, faces, face_depth, gaze_field, device)
@@ -167,9 +169,12 @@ def train():
                 # Angle loss
             gt_direction = gaze - eye
                 # generate angle heatmap
-            angle_heatmap_pred = imutils.generate_angle_heatmap(direction, args.batch_size, angle_heatmap_width, angle_heatmap_heigh).to(device)
-            angle_heatmap = imutils.generate_angle_heatmap(gt_direction, args.batch_size, angle_heatmap_width, angle_heatmap_heigh).to(device)
-            angle_loss = angle_heatmap_loss(angle_heatmap_pred, angle_heatmap) * loss_amp_factor_mse
+            angle_heatmap_pred = imutils.generate_angle_heatmap(direction, batchsize, angle_heatmap_width, angle_heatmap_heigh).to(device)
+            angle_heatmap = imutils.generate_angle_heatmap(gt_direction, batchsize, angle_heatmap_width, angle_heatmap_heigh).to(device)
+            angle_loss = (
+                            torch.mean(1 - cosine_similarity(direction, gt_direction)) +
+                            angle_heatmap_loss(angle_heatmap_pred, angle_heatmap) * loss_amp_factor_mse / loss_amp_factor_angle
+                         ) / 2 * loss_amp_factor_angle
             angle_loss = Variable(angle_loss, requires_grad=True)
 
             if ep == 0:
@@ -219,6 +224,7 @@ def train():
                         val_angle_heatmap = val_angle_heatmap.to(device)
                         val_gaze_field = val_gaze_field.to(device)
                         val_eye = val_eye.to(device)
+                        val_batchsize = val_img.size(0)
 
                         # predict heatmap(N, 1, 64, 64), mean of attention, in/out
                         val_gaze_heatmap_pred, val_attmap, val_inout_pred, val_direction, val_gaze_field_map = model(val_images, val_depth, val_head, val_faces, val_face_depth, val_gaze_field, device)
@@ -230,8 +236,9 @@ def train():
                         val_l2_loss = torch.mean(val_l2_loss, dim=1) # (N)
                         val_l2_loss = torch.mean(val_l2_loss, dim=0) # (1)
                             # Angle loss
-                        val_angle_heatmap_pred = imutils.generate_angle_heatmap(val_direction, args.batch_size, angle_heatmap_width, angle_heatmap_heigh).to(device)
+                        val_angle_heatmap_pred = imutils.generate_angle_heatmap(val_direction, val_batchsize, angle_heatmap_width, angle_heatmap_heigh).to(device)
                         val_angle_loss = angle_heatmap_loss(val_angle_heatmap_pred, val_angle_heatmap) * loss_amp_factor_mse
+                        val_angle_loss_min = torch.tensor(float('inf')).to(device)
 
                         val_gaze_heatmap_pred = val_gaze_heatmap_pred.cpu()
 
@@ -251,6 +258,11 @@ def train():
                             all_distances = []
                             for gt_gaze in valid_gaze:
                                 all_distances.append(evaluation.L2_dist(gt_gaze, norm_p))
+                                gt_gaze = gt_gaze.to(device)
+                                val_gt_direction_temp = gt_gaze - val_eye
+                                val_angle_loss_temp = torch.mean(1 - cosine_similarity(val_direction, val_gt_direction_temp)) * loss_amp_factor_angle
+                                val_angle_loss_min = val_angle_loss_temp if val_angle_loss_min > val_angle_loss_temp else val_angle_loss_min
+                            val_angle_loss = (val_angle_loss + val_angle_loss_min) / 2
                             min_dist.append(min(all_distances))
                             # average distance: distance between the predicted point and human average point
                             mean_gt_gaze = torch.mean(valid_gaze, 0)
