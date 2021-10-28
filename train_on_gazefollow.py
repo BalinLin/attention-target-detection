@@ -64,14 +64,14 @@ def train():
     train_loader = torch.utils.data.DataLoader(dataset=train_dataset,
                                                batch_size=args.batch_size,
                                                shuffle=True,
-                                               num_workers=0)
+                                               num_workers=4)
 
     val_dataset = GazeFollow(gazefollow_val_data, gazefollow_val_depth, gazefollow_val_label,
                       transform, input_size=input_resolution, output_size=output_resolution, test=True)
     val_loader = torch.utils.data.DataLoader(dataset=val_dataset,
                                                batch_size=args.batch_size,
                                                shuffle=True,
-                                               num_workers=0)
+                                               num_workers=4)
 
     # Set up log dir
     logdir = os.path.join(args.log_dir,
@@ -120,8 +120,10 @@ def train():
     loss_amp_factor_inout = 100 # multiplied to the loss to prevent underflow
     loss_amp_factor_angle = 100 # multiplied to the loss to prevent underflow
     loss_amp_factor_depth = 100 # multiplied to the loss to prevent underflow
-    w1 = 0.5 # weight for heatmap loss
-    w2 = 0.5 # weight for angle loss
+    lambda_heatmap = 0.5 # weight for heatmap loss
+    lambda_angle = 0.5 # weight for angle loss
+    lambda_depth = 0.25 # weight for depth loss
+
     max_steps = len(train_loader)
     optimizer.zero_grad()
 
@@ -176,11 +178,11 @@ def train():
             depth_loss = L1_loss(direction[:, 2], relative_depth) * loss_amp_factor_depth
 
             if ep == 0:
-                total_loss = w2 * angle_loss + w2 * depth_loss
+                total_loss = lambda_angle * angle_loss + lambda_depth * depth_loss
             elif ep >= 7 and ep <= 14:
                 total_loss = l2_loss #+ Xent_loss
             else:
-                total_loss = w1 * l2_loss + w2 * angle_loss + w2 * depth_loss #+ Xent_loss
+                total_loss = lambda_heatmap * l2_loss + lambda_angle * angle_loss + lambda_depth * depth_loss #+ Xent_loss
 
             # NOTE: summed loss is used to train the main model.
             #       l2_loss is used to get SOTA on GazeFollow benchmark.
@@ -270,11 +272,11 @@ def train():
                             avg_dist.append(avg_distance)
 
                         if ep == 0:
-                            val_total_loss = w2 * val_angle_loss + w2 * val_depth_loss
+                            val_total_loss = lambda_angle * val_angle_loss + lambda_depth * val_depth_loss
                         elif ep >= 7 and ep <= 14:
                             val_total_loss = val_l2_loss #+ Xent_loss
                         else:
-                            val_total_loss = w1 * val_l2_loss + w2 * val_angle_loss + w2 * val_depth_loss #+ Xent_loss
+                            val_total_loss = lambda_heatmap * val_l2_loss + lambda_angle * val_angle_loss + lambda_depth * val_depth_loss #+ Xent_loss
 
                 print("\tAUC:{:.4f}\tmin dist:{:.4f}\tavg dist:{:.4f}".format(
                       torch.mean(torch.tensor(AUC)),
