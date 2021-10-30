@@ -99,7 +99,6 @@ def train():
     # Loss functions
     # MSE(https://blog.csdn.net/hao5335156/article/details/81029791)
     mse_loss = nn.MSELoss(reduce=False) # not reducing in order to ignore outside cases
-    L1_loss = nn.L1Loss(reduction='mean')
     bcelogit_loss = nn.BCEWithLogitsLoss()
     cosine_similarity = nn.CosineSimilarity()
 
@@ -143,7 +142,7 @@ def train():
             # gaze.shape -> (N, 2)
             # relative_depth.shape -> (N, 1)
         for batch, (img, dep, face, face_dep, head_channel, gaze_heatmap, gaze_field, eye, gaze, name, gaze_inside, relative_depth) in enumerate(train_loader):
-            model.train(True) # https://stackoverflow.com/questions/51433378/what-does-model-train-do-in-pytorch
+            model.train(True).float() # https://stackoverflow.com/questions/51433378/what-does-model-train-do-in-pytorch
             images = img.to(device)
             depth = dep.to(device)
             head = head_channel.to(device)
@@ -159,7 +158,7 @@ def train():
             # predict heatmap(N, 1, 64, 64), mean of attention, in/out
             gaze_heatmap_pred, attmap, inout_pred, direction, gaze_field_map = model(images, depth, head, faces, face_depth, gaze_field, device)
             gaze_heatmap_pred = gaze_heatmap_pred.squeeze(1)
-
+            direction = direction.float()
             # Loss
                 # l2 loss computed only for inside case
             l2_loss = mse_loss(gaze_heatmap_pred, gaze_heatmap) * loss_amp_factor_mse # (N, 64, 64)
@@ -173,11 +172,18 @@ def train():
                 # Angle loss
             gt_direction = gaze - eye
             gt_direction = torch.cat((gt_direction, relative_depth), dim=1)
-            angle_loss = (1 - cosine_similarity(direction, gt_direction)) * loss_amp_factor_angle # (N)
-            angle_loss = torch.mul(angle_loss, gaze_inside) # zero out loss when it's out-of-frame gaze case
-            angle_loss = torch.sum(angle_loss)/torch.sum(gaze_inside)
+            angle_loss_cos = (1 - cosine_similarity(direction.float(), gt_direction.float())) * loss_amp_factor_angle # (N)
+            angle_loss_cos = torch.mul(angle_loss_cos, gaze_inside) # zero out loss when it's out-of-frame gaze case
+            angle_loss_cos = torch.sum(angle_loss_cos)/torch.sum(gaze_inside)
 
-            if ep == 0:
+            angle_loss_mse = mse_loss(direction.float(), gt_direction.float()) * loss_amp_factor_angle # (N, 3)
+            angle_loss_mse = torch.mean(angle_loss_mse, dim=1) # (N)
+            angle_loss_mse = torch.mul(angle_loss_mse, gaze_inside) # zero out loss when it's out-of-frame gaze case
+            angle_loss_mse = torch.sum(angle_loss_mse)/torch.sum(gaze_inside)
+
+            angle_loss = (angle_loss_cos + angle_loss_mse) / 2
+
+            if ep < 3:
                 total_loss = angle_loss
             elif ep >= 7 and ep <= 14:
                 total_loss = l2_loss #+ Xent_loss
@@ -261,7 +267,12 @@ def train():
                                 val_relative_depth = torch.unsqueeze(val_relative_depth, 0)
                                 val_gt_direction = gt_gaze - val_eye[b_i]
                                 val_gt_direction = torch.cat((val_gt_direction, val_relative_depth), dim=0)
-                                val_angle_loss_temp = (1 - cosine_similarity(torch.unsqueeze(val_direction[b_i], 0), torch.unsqueeze(val_gt_direction, 0))) * loss_amp_factor_angle # (1)
+                                val_angle_loss_cos = (1 - cosine_similarity(torch.unsqueeze(val_direction[b_i], 0).float(), torch.unsqueeze(val_gt_direction, 0).float())) * loss_amp_factor_angle # (1)
+
+                                val_angle_loss_mse = mse_loss(torch.unsqueeze(val_direction[b_i], 0).float(), torch.unsqueeze(val_gt_direction, 0).float()) * loss_amp_factor_angle # (1, 3)
+                                val_angle_loss_mse = torch.mean(val_angle_loss_mse, dim=1) # (1)
+
+                                val_angle_loss_temp = (val_angle_loss_cos + val_angle_loss_mse) / 2
                                 val_angle_loss = val_angle_loss_temp if val_angle_loss > val_angle_loss_temp else val_angle_loss
                             min_dist.append(min(all_distances))
                             # average distance: distance between the predicted point and human average point
@@ -269,7 +280,7 @@ def train():
                             avg_distance = evaluation.L2_dist(mean_gt_gaze, norm_p)
                             avg_dist.append(avg_distance)
 
-                        if ep == 0:
+                        if ep < 3:
                             val_total_loss = lambda_angle * val_angle_loss
                         elif ep >= 7 and ep <= 14:
                             val_total_loss = val_l2_loss #+ Xent_loss
