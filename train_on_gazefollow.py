@@ -64,14 +64,14 @@ def train():
     train_loader = torch.utils.data.DataLoader(dataset=train_dataset,
                                                batch_size=args.batch_size,
                                                shuffle=True,
-                                               num_workers=0)
+                                               num_workers=4)
 
     val_dataset = GazeFollow(gazefollow_val_data, gazefollow_val_depth, gazefollow_val_label,
                       transform, input_size=input_resolution, output_size=output_resolution, test=True)
     val_loader = torch.utils.data.DataLoader(dataset=val_dataset,
                                                batch_size=args.batch_size,
                                                shuffle=True,
-                                               num_workers=0)
+                                               num_workers=4)
 
     # Set up log dir
     logdir = os.path.join(args.log_dir,
@@ -253,8 +253,6 @@ def train():
                             all_distances = []
                             for gt_gaze in valid_gaze:
                                 all_distances.append(evaluation.L2_dist(gt_gaze, norm_p))
-                                gt_gaze = gt_gaze.to(device)
-                                val_gt_direction_temp = gt_gaze - val_eye
                             min_dist.append(min(all_distances))
                             # average distance: distance between the predicted point and human average point
                             mean_gt_gaze = torch.mean(valid_gaze, 0)
