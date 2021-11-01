@@ -168,8 +168,8 @@ def train():
                 # Angle loss
             gt_direction = gaze - eye
                 # generate angle heatmap
-            angle_heatmap_pred = imutils.generate_angle_heatmap(direction, batchsize, angle_heatmap_width, angle_heatmap_heigh).to(device)
-            angle_heatmap = imutils.generate_angle_heatmap(gt_direction, batchsize, angle_heatmap_width, angle_heatmap_heigh).to(device)
+            angle_heatmap_pred = imutils.generate_angle_heatmap(direction, batchsize, angle_heatmap_width, angle_heatmap_heigh, angle_heatmap_gamma).to(device)
+            angle_heatmap = imutils.generate_angle_heatmap(gt_direction, batchsize, angle_heatmap_width, angle_heatmap_heigh, angle_heatmap_gamma).to(device)
             angle_loss = angle_heatmap_loss(angle_heatmap_pred, angle_heatmap) * loss_amp_factor_mse
             angle_loss = Variable(angle_loss, requires_grad=True)
 
@@ -232,7 +232,7 @@ def train():
                         val_l2_loss = torch.mean(val_l2_loss, dim=1) # (N)
                         val_l2_loss = torch.mean(val_l2_loss, dim=0) # (1)
                             # Angle loss
-                        val_angle_heatmap_pred = imutils.generate_angle_heatmap(val_direction, val_batchsize, angle_heatmap_width, angle_heatmap_heigh).to(device)
+                        val_angle_heatmap_pred = imutils.generate_angle_heatmap(val_direction, val_batchsize, angle_heatmap_width, angle_heatmap_heigh, angle_heatmap_gamma).to(device)
                         val_angle_loss = angle_heatmap_loss(val_angle_heatmap_pred, val_angle_heatmap) * loss_amp_factor_mse
 
                         val_gaze_heatmap_pred = val_gaze_heatmap_pred.cpu()

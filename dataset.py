@@ -44,7 +44,7 @@ def generate_data_field(eye_point, input_size):
 
 class GazeFollow(Dataset):
     def __init__(self, data_dir, depth_dir, csv_path, transform, input_size=input_resolution, output_size=output_resolution,
-                 angle_heatmap_width_size=angle_heatmap_width, angle_heatmap_heigh_size=angle_heatmap_heigh, test=False, imshow=False):
+                 angle_heatmap_width_size=angle_heatmap_width, angle_heatmap_heigh_size=angle_heatmap_heigh, angle_heatmap_gamma_scale=angle_heatmap_gamma, test=False, imshow=False):
         if test:
             column_names = ['path', 'idx', 'body_bbox_x', 'body_bbox_y', 'body_bbox_w', 'body_bbox_h', 'eye_x', 'eye_y',
                             'gaze_x', 'gaze_y', 'bbox_x_min', 'bbox_y_min', 'bbox_x_max', 'bbox_y_max', 'meta']
@@ -75,6 +75,7 @@ class GazeFollow(Dataset):
         self.output_size = output_size
         self.angle_heatmap_width = angle_heatmap_width_size
         self.angle_heatmap_heigh = angle_heatmap_heigh_size
+        self.angle_heatmap_gamma = angle_heatmap_gamma_scale
         self.imshow = imshow
 
     def __getitem__(self, index):
@@ -233,7 +234,7 @@ class GazeFollow(Dataset):
                                                          3,
                                                          type='Gaussian')
                     angle_heatmap = imutils.draw_labelmap(angle_heatmap, [int(direction_x * angle_heatmap_width / 2), int(direction_y * angle_heatmap_heigh / 2)],
-                                                         10,
+                                                         self.angle_heatmap_gamma,
                                                          type='Gaussian')
             gaze_heatmap /= num_valid
             angle_heatmap /= num_valid

@@ -25,3 +25,4 @@ input_resolution = 224
 output_resolution = 64
 angle_heatmap_width = 180
 angle_heatmap_heigh = 180
+angle_heatmap_gamma = 10
