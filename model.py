@@ -268,9 +268,9 @@ class ModelSpatial(nn.Module):
 
         # get and reshape attention weights such that it can be multiplied with scene feature map
         attn_weights = self.attn(torch.cat((head_reduced, face_feat_reduced), 1)) # (N, 1808)
-        attn_weights = attn_weights.view(-1, 1, 49) # (N, 1, 49)
-        attn_weights = F.softmax(attn_weights, dim=2) # soft attention weights single-channel, value of attention(dim=2) to be [0-1]
-        attn_weights = attn_weights.view(-1, 1, 7, 7) # (N, 1, 7, 7)
+        attn_weights = attn_weights.view(-1, 1, 49)     # (N, 1, 49)
+        attn_weights = F.softmax(attn_weights, dim=2)   # soft attention weights single-channel, value of attention(dim=2) to be [0-1]
+        attn_weights = attn_weights.view(-1, 1, 7, 7)   # (N, 1, 7, 7)
 
         # origin image concat with depth map and haed position (N, 6, 224, 224) + (N, 1, 224, 224) + (N, 1, 224, 224) -> (N, 8, 224, 224)
         # depth_gamma = depth * self.gamma_fovdepthm * gaze_field_map_gamma
@@ -306,23 +306,23 @@ class ModelSpatial(nn.Module):
         attn_applied_scene_feat = torch.mul(attn_weights, scene_feat) # (N, 1, 7, 7) * (N, 1024, 7, 7) -> (N, 1024, 7, 7)
 
         # attention feature concat with face feature
-        scene_face_feat = torch.cat((attn_applied_scene_feat, face_feat), 1) #  (N, 1024, 7, 7) + (N, 1024, 7, 7) -> (N, 2048, 7, 7)
+        scene_face_feat = torch.cat((attn_applied_scene_feat, face_feat), 1) # (N, 1024, 7, 7) + (N, 1024, 7, 7) -> (N, 2048, 7, 7)
 
         # scene + face feat -> in/out
         encoding_inout = self.compress_conv1_inout(scene_face_feat) # (N, 2048, 7, 7) -> (N, 512, 7, 7)
         encoding_inout = self.compress_bn1_inout(encoding_inout)
         encoding_inout = self.relu(encoding_inout)
-        encoding_inout = self.compress_conv2_inout(encoding_inout) # (N, 512, 7, 7) -> (N, 1, 7, 7)
+        encoding_inout = self.compress_conv2_inout(encoding_inout)  # (N, 512, 7, 7) -> (N, 1, 7, 7)
         encoding_inout = self.compress_bn2_inout(encoding_inout)
         encoding_inout = self.relu(encoding_inout)
-        encoding_inout = encoding_inout.view(-1, 49) # (N, 1, 7, 7) -> (N, 49)
-        encoding_inout = self.fc_inout(encoding_inout) # (N, 49) -> (N, 1)
+        encoding_inout = encoding_inout.view(-1, 49)    # (N, 1, 7, 7) -> (N, 49)
+        encoding_inout = self.fc_inout(encoding_inout)  # (N, 49) -> (N, 1)
 
         # scene + face feat -> encoding -> decoding
         encoding = self.compress_conv1(scene_face_feat) # (N, 2048, 7, 7) -> (N, 1024, 7, 7)
         encoding = self.compress_bn1(encoding)
         encoding = self.relu(encoding)
-        encoding = self.compress_conv2(encoding) # (N, 1024, 7, 7) -> (N, 512, 7, 7)
+        encoding = self.compress_conv2(encoding)        # (N, 1024, 7, 7) -> (N, 512, 7, 7)
         encoding = self.compress_bn2(encoding)
         encoding = self.relu(encoding)
 
@@ -398,6 +398,7 @@ class ModelSpatioTemporal(nn.Module):
                                                      stride=1,
                                                      dropout=0.5)
 
+        # decoding
         self.deconv1 = nn.ConvTranspose2d(512, 256, kernel_size=3, stride=2)
         self.deconv_bn1 = nn.BatchNorm2d(256)
         self.deconv2 = nn.ConvTranspose2d(256, 128, kernel_size=3, stride=2)
@@ -407,10 +408,14 @@ class ModelSpatioTemporal(nn.Module):
         self.conv4 = nn.Conv2d(1, 1, kernel_size=1, stride=1)
 
         # Initialize weights
+        self.initialize_weights()
+
+    def initialize_weights(self):
         for m in self.modules():
-            if isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
-                n = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
-                m.weight.data.normal_(0, math.sqrt(2. / n))
+            if isinstance(m, nn.Linear) or isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    m.bias.data.zero_()
             elif isinstance(m, nn.BatchNorm2d):
                 m.weight.data.fill_(1)
                 m.bias.data.zero_()
@@ -450,79 +455,94 @@ class ModelSpatioTemporal(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, images, head, face, hidden_scene: tuple = None, batch_sizes: list = None):
-        face = self.conv1_face(face)
+        ### images -> whole image(Scene Image), head -> position image(Head Position), face -> head image(Cropped Head)
+        # N = chunk_size.
+        # images.shape -> torch.Size([N, 3, 224, 224])
+        # head.shape -> torch.Size([N, 1, 224, 224])
+        # face.shape -> torch.Size([N, 3, 224, 224])
+        # hidden_scene.shape -> torch.Size([2, num_lstm_layers, batch_size, 512, 7, 7])
+        # batch_sizes.shape -> torch.Size([N])
+
+        face = self.conv1_face(face)        # (N, 3, 224, 224) -> (N, 64, 112, 112)
         face = self.bn1_face(face)
         face = self.relu(face)
-        face = self.maxpool(face)
-        face = self.layer1_face(face)
-        face = self.layer2_face(face)
-        face = self.layer3_face(face)
-        face = self.layer4_face(face)
-        face_feat = self.layer5_face(face)
+        face = self.maxpool(face)           # (N, 64, 112, 112) -> (N, 64, 56, 56)
+        face = self.layer1_face(face)       # (N, 64, 56, 56) -> (N, 256, 56, 56)
+        face = self.layer2_face(face)       # (N, 256, 56, 56) -> (N, 512, 28, 28)
+        face = self.layer3_face(face)       # (N, 512, 28, 28) -> (N, 1024, 14, 14)
+        face = self.layer4_face(face)       # (N, 1024, 14, 14) -> (N, 2048, 7, 7)
+        face_feat = self.layer5_face(face)  # (N, 2048, 7, 7) -> (N, 1024, 7, 7)
 
         # reduce head channel size by max pooling: (N, 1, 224, 224) -> (N, 1, 28, 28)
         head_reduced = self.maxpool(self.maxpool(self.maxpool(head))).view(-1, 784)
+
         # reduce face feature size by avg pooling: (N, 1024, 7, 7) -> (N, 1024, 1, 1)
         face_feat_reduced = self.avgpool(face_feat).view(-1, 1024)
+
         # get and reshape attention weights such that it can be multiplied with scene feature map
         attn_weights = self.attn(torch.cat((head_reduced, face_feat_reduced), 1))
-        attn_weights = attn_weights.view(-1, 1, 49)
-        attn_weights = F.softmax(attn_weights, dim=2) # soft attention weights single-channel
-        attn_weights = attn_weights.view(-1, 1, 7, 7)
+        attn_weights = attn_weights.view(-1, 1, 49)     # (N, 1, 49)
+        attn_weights = F.softmax(attn_weights, dim=2)   # soft attention weights single-channel
+        attn_weights = attn_weights.view(-1, 1, 7, 7)   # (N, 1, 49)
 
         im = torch.cat((images, head), dim=1)
-        im = self.conv1_scene(im)
+        im = self.conv1_scene(im)           # (N, 4, 224, 224) -> (N, 64, 112, 112)
         im = self.bn1_scene(im)
         im = self.relu(im)
-        im = self.maxpool(im)
-        im = self.layer1_scene(im)
-        im = self.layer2_scene(im)
-        im = self.layer3_scene(im)
-        im = self.layer4_scene(im)
-        scene_feat = self.layer5_scene(im)
-        attn_applied_scene_feat = torch.mul(attn_weights, scene_feat) # (N, 1, 7, 7) # applying attention weights on scene feat
+        im = self.maxpool(im)               # (N, 64, 112, 112) -> (N, 64, 56, 56)
+        im = self.layer1_scene(im)          # (N, 64, 56, 56) -> (N, 256, 56, 56)
+        im = self.layer2_scene(im)          # (N, 256, 56, 56) -> (N, 512, 28, 28)
+        im = self.layer3_scene(im)          # (N, 512, 28, 28) -> (N, 1024, 14, 14)
+        im = self.layer4_scene(im)          # (N, 1024, 14, 14) -> (N, 2048, 7, 7)
+        scene_feat = self.layer5_scene(im)  # (N, 2048, 7, 7) -> (N, 1024, 7, 7)
 
-        scene_face_feat = torch.cat((attn_applied_scene_feat, face_feat), 1)
+        # applying attention weights on scene feat
+        # attn_weights = torch.ones(attn_weights.shape)/49.0
+        attn_applied_scene_feat = torch.mul(attn_weights, scene_feat) # (N, 1, 7, 7) * (N, 1024, 7, 7) -> (N, 1024, 7, 7)
+
+        scene_face_feat = torch.cat((attn_applied_scene_feat, face_feat), 1) # (N, 1024, 7, 7) + (N, 1024, 7, 7) -> (N, 2048, 7, 7)
 
         # scene + face feat -> in/out
-        encoding_inout = self.compress_conv1_inout(scene_face_feat)
+        encoding_inout = self.compress_conv1_inout(scene_face_feat) # (N, 2048, 7, 7) -> (N, 512, 7, 7)
         encoding_inout = self.compress_bn1_inout(encoding_inout)
         encoding_inout = self.relu(encoding_inout)
-        encoding_inout = self.compress_conv2_inout(encoding_inout)
+        encoding_inout = self.compress_conv2_inout(encoding_inout)  # (N, 512, 7, 7) -> (N, 1, 7, 7)
         encoding_inout = self.compress_bn2_inout(encoding_inout)
         encoding_inout = self.relu(encoding_inout)
+        encoding_inout = encoding_inout.view(-1, 49)    # (N, 1, 7, 7) -> (N, 49)
+        encoding_inout = self.fc_inout(encoding_inout)  # (N, 49) -> (N, 1)
 
         # scene + face feat -> encoding -> decoding
-        encoding = self.compress_conv1(scene_face_feat)
+        encoding = self.compress_conv1(scene_face_feat) # (N, 2048, 7, 7) -> (N, 1024, 7, 7)
         encoding = self.compress_bn1(encoding)
         encoding = self.relu(encoding)
-        encoding = self.compress_conv2(encoding)
+        encoding = self.compress_conv2(encoding)        # (N, 1024, 7, 7) -> (N, 512, 7, 7)
         encoding = self.compress_bn2(encoding)
         encoding = self.relu(encoding)
 
         # RW edit: x should be of shape (size, channel, width, height)
-        x_pad = PackedSequence(encoding, batch_sizes)
-        y, hx = self.convlstm_scene(x_pad, hx=hidden_scene)
-        deconv = y.data
+        # x_pad = PackedSequence(encoding.cpu(), batch_sizes.cpu())   # (N, 512, 7, 7) and (N) -> (N, 512, 7, 7)
+        # x_pad = PackedSequence(encoding.cpu(), batch_sizes.cpu()).data   # (N, 512, 7, 7) and (N) -> (N, 512, 7, 7)
+        # y, hx = self.convlstm_scene(x_pad, hx=hidden_scene)
+        # deconv = y.data
 
-        inout_val = encoding_inout.view(-1, 49)
-        inout_val = self.fc_inout(inout_val)
-
-        deconv = self.deconv1(deconv)
+        # https://pytorch.org/docs/stable/generated/torch.nn.ConvTranspose2d.html
+        # Hout​=(Hin​−1)×stride[0]−2×padding[0]+dilation[0]×(kernel_size[0]−1)+output_padding[0]+1
+        deconv = self.deconv1(encoding)   # (N, 512, 7, 7) -> (N, 256, 15, 15)
         if encoding.shape[0] > 1:
             deconv = self.deconv_bn1(deconv)
         deconv = self.relu(deconv)
-        deconv = self.deconv2(deconv)
+        deconv = self.deconv2(deconv)   # (N, 256, 15, 15) -> (N, 128, 31, 31)
         if encoding.shape[0] > 1:
             deconv = self.deconv_bn2(deconv)
         deconv = self.relu(deconv)
-        deconv = self.deconv3(deconv)
+        deconv = self.deconv3(deconv)   # (N, 128, 31, 31) -> (N, 1, 64, 64)
         if encoding.shape[0] > 1:
             deconv = self.deconv_bn3(deconv)
         deconv = self.relu(deconv)
-        deconv = self.conv4(deconv)
+        deconv = self.conv4(deconv)     # (N, 1, 64, 64) -> (N, 1, 64, 64)
 
-        return deconv, inout_val, hx
+        return deconv, encoding_inout, hidden_scene
 
 
 def _get_clones(module, N):

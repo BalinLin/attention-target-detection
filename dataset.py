@@ -495,6 +495,7 @@ class VideoAttTarget_video(Dataset):
         gazes = torch.stack(gazes)
         gaze_inouts = torch.stack(gaze_inouts)
         # imsizes = torch.stack(imsizes)
+        # torch.Size([seq_len_limit_config, 3, 224, 224]) torch.Size([seq_len_limit_config, 3, 224, 224]) torch.Size([seq_len_limit_config, 1, 224, 224]) torch.Size([seq_len_limit_config, 64, 64])
         # print(faces.shape, images.shape, head_channels.shape, heatmaps.shape)
 
         if self.test:
