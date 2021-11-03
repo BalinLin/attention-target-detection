@@ -117,7 +117,7 @@ def train():
     loss_amp_factor_inout = 100 # multiplied to the loss to prevent underflow
     max_steps = len(train_loader)
     optimizer.zero_grad()
-    # wandb.init(project="videoatttarget", config=args)
+    wandb.init(project="videoatttarget", config=args)
     # wandb.watch(model, mse_loss, log='all', log_freq=100)
 
     print("Training in progress ...")
