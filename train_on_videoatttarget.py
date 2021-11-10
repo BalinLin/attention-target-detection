@@ -5,7 +5,7 @@ import torch.nn as nn
 from torch.nn.utils.rnn import pack_padded_sequence, PackedSequence
 import wandb
 
-from model import ModelSpatioTemporal
+from model import ModelSpatial
 from dataset import VideoAttTarget_video
 from config import *
 from utils import imutils, evaluation, misc
@@ -24,7 +24,7 @@ warnings.simplefilter(action='ignore')
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--device", type=int, default=0, help="gpu id")
-parser.add_argument("--init_weights", type=str, default='initial_weights_for_temporal_training.pt', help="initial weights")
+parser.add_argument("--init_weights", type=str, default='test.pt', help="initial weights")
 parser.add_argument("--lr", type=float, default=5e-5, help="learning rate")
 parser.add_argument("--batch_size", type=int, default=16, help="batch size")
 parser.add_argument("--chunk_size", type=int, default=3, help="update every ___ frames")
@@ -59,7 +59,7 @@ def train():
 
     # Prepare data
     print("Loading Data")
-    train_dataset = VideoAttTarget_video(videoattentiontarget_train_data, videoattentiontarget_train_label,
+    train_dataset = VideoAttTarget_video(videoattentiontarget_train_data, videoattentiontarget_train_depth, videoattentiontarget_train_label,
                                           transform=transform, test=False, seq_len_limit=seq_len_limit_config)
     train_loader = torch.utils.data.DataLoader(dataset=train_dataset,
                                                batch_size=args.batch_size,
@@ -67,7 +67,7 @@ def train():
                                                num_workers=0,
                                                collate_fn=video_pack_sequences)
 
-    val_dataset = VideoAttTarget_video(videoattentiontarget_val_data, videoattentiontarget_val_label,
+    val_dataset = VideoAttTarget_video(videoattentiontarget_val_data, videoattentiontarget_val_depth, videoattentiontarget_val_label,
                                         transform=transform, test=True, seq_len_limit=seq_len_limit_config)
     val_loader = torch.utils.data.DataLoader(dataset=val_dataset,
                                              batch_size=args.batch_size,
@@ -88,7 +88,7 @@ def train():
     # Load model
     num_lstm_layers = 2
     print("Constructing model")
-    model = ModelSpatioTemporal(num_lstm_layers = num_lstm_layers)
+    model = ModelSpatial()
     model.cuda(device)
     if args.init_weights:
         print("Loading weights")
@@ -104,7 +104,6 @@ def train():
 
     # Optimizer
     optimizer = torch.optim.Adam([
-                        {'params': model.convlstm_scene.parameters(), 'lr': args.lr},
                         {'params': model.deconv1.parameters(), 'lr': args.lr},
                         {'params': model.deconv2.parameters(), 'lr': args.lr},
                         {'params': model.deconv3.parameters(), 'lr': args.lr},
@@ -124,11 +123,15 @@ def train():
     for ep in range(args.epochs):
         # img -> whole image(Scene Image), face -> head image(Cropped Head), head_channel -> position image(Head Position)
             # img.shape -> (N, max_length, 3, 224, 224)
+            # depth.shape -> (N, max_length, 1, 224, 224)
             # face.shape -> (N, max_length, 3, 224, 224)
+            # face_depth.shape -> (N, max_length, 1, 224, 224)
             # head_channel.shape -> (N, max_length, 1, 224, 224)
             # gaze_heatmap.shape -> (N, max_length, 64, 64)
+            # gaze_field.shape -> (N, max_length, 2, 224, 224)
+            # inout_label.shape -> (N, max_length, 1)
             # lengths.shape -> (N)
-        for batch, (img, face, head_channel, gaze_heatmap, inout_label, lengths) in enumerate(train_loader):
+        for batch, (img, depth, face, face_depth, head_channel, gaze_heatmap, gaze_field, inout_label, lengths) in enumerate(train_loader):
             model.train(True)
             # freeze batchnorm layers
             for module in model.modules():
@@ -143,20 +146,23 @@ def train():
             # https://zhuanlan.zhihu.com/p/342685890
             pad_data = pack_padded_sequence(img, lengths, batch_first=True)
             X_pad_data_img, X_pad_sizes = pad_data.data, pad_data.batch_sizes
+            X_pad_data_depth = pack_padded_sequence(depth, lengths, batch_first=True).data
             X_pad_data_face = pack_padded_sequence(face, lengths, batch_first=True).data
+            X_pad_data_face_depth = pack_padded_sequence(face_depth, lengths, batch_first=True).data
             X_pad_data_head = pack_padded_sequence(head_channel, lengths, batch_first=True).data
             Y_pad_data_heatmap = pack_padded_sequence(gaze_heatmap, lengths, batch_first=True).data
+            Y_pad_data_gaze_field = pack_padded_sequence(gaze_field, lengths, batch_first=True).data
             Y_pad_data_inout = pack_padded_sequence(inout_label, lengths, batch_first=True).data
 
             # (num_layers, batch_size, feature dims)
-            hx = (torch.zeros((num_lstm_layers, args.batch_size, 512, 7, 7)).cuda(device),
-                  torch.zeros((num_lstm_layers, args.batch_size, 512, 7, 7)).cuda(device))
+            # hx = (torch.zeros((num_lstm_layers, args.batch_size, 512, 7, 7)).cuda(device),
+            #       torch.zeros((num_lstm_layers, args.batch_size, 512, 7, 7)).cuda(device))
             last_index = 0
-            previous_hx_size = args.batch_size
+            # previous_hx_size = args.batch_size
             avg_l2_loss = []
             avg_Xent_loss = []
 
-            for i in range(0, lengths[0], args.chunk_size):
+            for i in range(0, lengths[0], args.chunk_size): # (args.chunk_size, C, H, W)
                 # In this for loop, we read batched images across the time dimension
                     # we step forward N = chunk_size frames
                 X_pad_sizes_slice = X_pad_sizes[i:i + args.chunk_size].cuda(device)
@@ -164,31 +170,39 @@ def train():
 
                 # slice padded data
                 X_pad_data_slice_img = X_pad_data_img[last_index:last_index + curr_length].cuda(device)
+                X_pad_data_slice_depth = X_pad_data_depth[last_index:last_index + curr_length].cuda(device)
                 X_pad_data_slice_face = X_pad_data_face[last_index:last_index + curr_length].cuda(device)
+                X_pad_data_slice_face_depth = X_pad_data_face_depth[last_index:last_index + curr_length].cuda(device)
                 X_pad_data_slice_head = X_pad_data_head[last_index:last_index + curr_length].cuda(device)
                 Y_pad_data_slice_heatmap = Y_pad_data_heatmap[last_index:last_index + curr_length].cuda(device)
+                Y_pad_data_slice_gaze_field = Y_pad_data_gaze_field[last_index:last_index + curr_length].cuda(device)
                 Y_pad_data_slice_inout = Y_pad_data_inout[last_index:last_index + curr_length].cuda(device)
                 last_index += curr_length
 
                 # detach previous hidden states to stop gradient flow
-                prev_hx = (hx[0][:, :min(X_pad_sizes_slice[0], previous_hx_size), :, :, :].detach(),
-                           hx[1][:, :min(X_pad_sizes_slice[0], previous_hx_size), :, :, :].detach())
+                # prev_hx = (hx[0][:, :min(X_pad_sizes_slice[0], previous_hx_size), :, :, :].detach(),
+                #            hx[1][:, :min(X_pad_sizes_slice[0], previous_hx_size), :, :, :].detach())
 
                 # forward pass
-                deconv, inout_val, hx = model(X_pad_data_slice_img, X_pad_data_slice_head, X_pad_data_slice_face, \
-                                                         hidden_scene=prev_hx, batch_sizes=X_pad_sizes_slice)
+                gaze_heatmap_pred, attmap, inout_pred, direction, gaze_field_map = model(X_pad_data_slice_img, X_pad_data_slice_depth, \
+                                                                                         X_pad_data_slice_head, X_pad_data_slice_face, \
+                                                                                         X_pad_data_slice_face_depth, Y_pad_data_slice_gaze_field, \
+                                                                                         device)
+
+                # gaze_heatmap_pred, inout_pred, hx = model(X_pad_data_slice_img, X_pad_data_slice_head, X_pad_data_slice_face, \
+                #                                          hidden_scene=prev_hx, batch_sizes=X_pad_sizes_slice)
 
                 # compute loss
                     # l2 loss computed only for inside case
-                l2_loss = mse_loss(deconv.squeeze(1), Y_pad_data_slice_heatmap) * loss_amp_factor_mse
-                l2_loss = torch.mean(l2_loss, dim=1)
-                l2_loss = torch.mean(l2_loss, dim=1)
+                l2_loss = mse_loss(gaze_heatmap_pred.squeeze(1), Y_pad_data_slice_heatmap) * loss_amp_factor_mse # (args.chunk_size, 64, 64)
+                l2_loss = torch.mean(l2_loss, dim=1) # (args.chunk_size, 64)
+                l2_loss = torch.mean(l2_loss, dim=1) # (64)
                 Y_pad_data_slice_inout = Y_pad_data_slice_inout.cuda(device).to(torch.float).squeeze()
                 l2_loss = torch.mul(l2_loss, Y_pad_data_slice_inout) # zero out loss when it's outside gaze case
                 l2_loss = torch.sum(l2_loss)/torch.sum(Y_pad_data_slice_inout)
                 avg_l2_loss.append(l2_loss)
                     # cross entropy loss for in vs out
-                Xent_loss = bcelogit_loss(inout_val.squeeze(), Y_pad_data_slice_inout.squeeze()) * loss_amp_factor_inout
+                Xent_loss = bcelogit_loss(inout_pred.squeeze(), Y_pad_data_slice_inout.squeeze()) * loss_amp_factor_inout
                 avg_Xent_loss.append(Xent_loss)
 
                 total_loss = l2_loss + Xent_loss
@@ -198,7 +212,7 @@ def train():
                 optimizer.step()
                 optimizer.zero_grad()
 
-                previous_hx_size = X_pad_sizes_slice[-1]
+                # previous_hx_size = X_pad_sizes_slice[-1]
 
                 step += 1
 
@@ -210,42 +224,52 @@ def train():
                     model.train(False)
                     AUC = []; in_vs_out_groundtruth = []; in_vs_out_pred = []; distance = []
                     with torch.no_grad():
-                        for val_batch, (val_img, val_face, val_head_channel, val_gaze_heatmap, cont_gaze, val_inout_label, val_lengths) in enumerate(val_loader):
+                        for val_batch, (val_img, val_depth, val_face, val_face_depth, val_head_channel, val_gaze_heatmap, val_gaze_field, cont_gaze, val_inout_label, val_lengths) in enumerate(val_loader):
                             print('\tprogress = ', val_batch+1, '/', len(val_loader))
                             val_pad_data = pack_padded_sequence(val_img, val_lengths, batch_first=True)
                             val_X_pad_data_img, val_X_pad_sizes = val_pad_data.data, val_pad_data.batch_sizes
+                            val_X_pad_data_depth = pack_padded_sequence(val_depth, val_lengths, batch_first=True).data
                             val_X_pad_data_face = pack_padded_sequence(val_face, val_lengths, batch_first=True).data
+                            val_X_pad_data_face_depth = pack_padded_sequence(val_face_depth, val_lengths, batch_first=True).data
                             val_X_pad_data_head = pack_padded_sequence(val_head_channel, val_lengths, batch_first=True).data
-                            val_Y_pad_data_cont_gaze = pack_padded_sequence(cont_gaze, val_lengths, batch_first=True).data
                             val_Y_pad_data_heatmap = pack_padded_sequence(val_gaze_heatmap, val_lengths, batch_first=True).data
+                            val_Y_pad_data_gaze_field = pack_padded_sequence(val_gaze_field, val_lengths, batch_first=True).data
+                            val_Y_pad_data_cont_gaze = pack_padded_sequence(cont_gaze, val_lengths, batch_first=True).data
                             val_Y_pad_data_inout = pack_padded_sequence(val_inout_label, val_lengths, batch_first=True).data
 
                             # (num_layers, batch_size, feature dims)
-                            val_hx = (torch.zeros((num_lstm_layers, args.batch_size, 512, 7, 7)).cuda(device),
-                                      torch.zeros((num_lstm_layers, args.batch_size, 512, 7, 7)).cuda(device))
+                            # val_hx = (torch.zeros((num_lstm_layers, args.batch_size, 512, 7, 7)).cuda(device),
+                            #           torch.zeros((num_lstm_layers, args.batch_size, 512, 7, 7)).cuda(device))
                             val_last_index = 0
-                            val_previous_hx_size = args.batch_size
+                            # val_previous_hx_size = args.batch_size
 
-                            for j in range(0, val_lengths[0], args.chunk_size):
+                            for j in range(0, val_lengths[0], args.chunk_size): # (args.chunk_size, C, H, W)
                                 val_X_pad_sizes_slice = val_X_pad_sizes[j:j + args.chunk_size].cuda(device)
                                 val_curr_length = np.sum(val_X_pad_sizes_slice.cpu().detach().numpy())
                                 # slice padded data
                                 val_X_pad_data_slice_img = val_X_pad_data_img[val_last_index:val_last_index + val_curr_length].cuda(device)
+                                val_X_pad_data_slice_depth = val_X_pad_data_depth[val_last_index:val_last_index + val_curr_length].cuda(device)
                                 val_X_pad_data_slice_face = val_X_pad_data_face[val_last_index:val_last_index + val_curr_length].cuda(device)
+                                val_X_pad_data_slice_face_depth = val_X_pad_data_face_depth[val_last_index:val_last_index + val_curr_length].cuda(device)
                                 val_X_pad_data_slice_head = val_X_pad_data_head[val_last_index:val_last_index + val_curr_length].cuda(device)
-                                val_Y_pad_data_slice_cont_gaze = val_Y_pad_data_cont_gaze[val_last_index:val_last_index + val_curr_length].cuda(device)
                                 val_Y_pad_data_slice_heatmap = val_Y_pad_data_heatmap[val_last_index:val_last_index + val_curr_length].cuda(device)
+                                val_Y_pad_data_slice_gaze_field = val_Y_pad_data_gaze_field[val_last_index:val_last_index + val_curr_length].cuda(device)
+                                val_Y_pad_data_slice_cont_gaze = val_Y_pad_data_cont_gaze[val_last_index:val_last_index + val_curr_length].cuda(device)
                                 val_Y_pad_data_slice_inout = val_Y_pad_data_inout[val_last_index:val_last_index + val_curr_length].cuda(device)
                                 val_last_index += val_curr_length
 
                                 # detach previous hidden states to stop gradient flow
-                                val_prev_hx = (val_hx[0][:, :min(val_X_pad_sizes_slice[0], val_previous_hx_size), :, :, :].detach(),
-                                               val_hx[1][:, :min(val_X_pad_sizes_slice[0], val_previous_hx_size), :, :, :].detach())
+                                # val_prev_hx = (val_hx[0][:, :min(val_X_pad_sizes_slice[0], val_previous_hx_size), :, :, :].detach(),
+                                #                val_hx[1][:, :min(val_X_pad_sizes_slice[0], val_previous_hx_size), :, :, :].detach())
 
                                 # forward pass
-                                val_deconv, val_inout_val, val_hx = model(val_X_pad_data_slice_img, val_X_pad_data_slice_head, val_X_pad_data_slice_face, \
-                                                                          hidden_scene=val_prev_hx, batch_sizes=val_X_pad_sizes_slice)
-                                val_deconv = val_deconv.cpu()
+                                val_gaze_heatmap_pred, val_attmap, val_inout_pred, val_direction, val_gaze_field_map = \
+                                    model(val_X_pad_data_slice_img, val_X_pad_data_slice_depth, val_X_pad_data_slice_head, val_X_pad_data_slice_face, \
+                                          val_X_pad_data_slice_face_depth, val_Y_pad_data_slice_gaze_field, device)
+
+                                # val_gaze_heatmap_pred, val_inout_pred, val_hx = model(val_X_pad_data_slice_img, val_X_pad_data_slice_head, val_X_pad_data_slice_face, \
+                                #                                           hidden_scene=val_prev_hx, batch_sizes=val_X_pad_sizes_slice)
+                                val_gaze_heatmap_pred = val_gaze_heatmap_pred.cpu()
 
                                 for b_i in range(len(val_Y_pad_data_slice_cont_gaze)):
                                     if val_Y_pad_data_slice_inout[b_i]: # ONLY for 'inside' cases
@@ -257,21 +281,21 @@ def train():
                                         multi_hot = (multi_hot > 0).float() * 1 # make GT heatmap as binary labels
                                         multi_hot = misc.to_numpy(multi_hot)
 
-                                        scaled_heatmap = imresize(val_deconv[b_i].squeeze(), (output_resolution, output_resolution), interp = 'bilinear')
+                                        scaled_heatmap = imresize(val_gaze_heatmap_pred[b_i].squeeze(), (output_resolution, output_resolution), interp = 'bilinear')
                                         auc_score = evaluation.auc(scaled_heatmap, multi_hot)
                                         AUC.append(auc_score)
 
                                         # distance: L2 distance between ground truth and argmax point
-                                        pred_x, pred_y = evaluation.argmax_pts(val_deconv[b_i].squeeze())
+                                        pred_x, pred_y = evaluation.argmax_pts(val_gaze_heatmap_pred[b_i].squeeze())
                                         norm_p = [pred_x/output_resolution, pred_y/output_resolution]
                                         dist_score = evaluation.L2_dist(val_Y_pad_data_slice_cont_gaze[b_i].cpu(), norm_p).item()
                                         distance.append(dist_score)
 
                                 # in vs out classification
                                 in_vs_out_groundtruth.extend(val_Y_pad_data_slice_inout.cpu().numpy())
-                                in_vs_out_pred.extend(val_inout_val.cpu().numpy())
+                                in_vs_out_pred.extend(val_inout_pred.cpu().numpy())
 
-                                val_previous_hx_size = val_X_pad_sizes_slice[-1]
+                                # val_previous_hx_size = val_X_pad_sizes_slice[-1]
 
                             try:
                                 print("\tAUC:{:.4f}"
@@ -300,8 +324,8 @@ def train():
                                        wandb.Image(X_pad_data_face[last_index - curr_length:last_index], caption="faces"),
                                        wandb.Image(X_pad_data_head[last_index - curr_length:last_index], caption="head"),
                                        wandb.Image(t(Y_pad_data_heatmap[last_index - curr_length:last_index].unsqueeze(1)), caption="gaze_heatmap"),
-                                       wandb.Image(t(deconv), caption="gaze_heatmap_pred")]},
-                                       # wandb.Image(gaze_field_map, caption="gaze_heatmap_pred")]},
+                                       wandb.Image(t(gaze_heatmap_pred), caption="gaze_heatmap_pred"),
+                                       wandb.Image(Y_pad_data_gaze_field[last_index - curr_length:last_index], caption="gaze_heatmap_pred")]},
                                        step=(ep+1))
                     # wandb val
                     wandb.log({"Validation AUC": torch.mean(torch.tensor(AUC)),
