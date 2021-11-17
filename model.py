@@ -225,11 +225,11 @@ class ModelSpatial(nn.Module):
         # eye.shape -> torch.Size([batch_size, 2])
         # gaze.shape -> torch.Size([batch_size, 2])
 
-        direction, depth_scale = self.gaze(face, device) # (N, 3, 224, 224) -> (N, 2) + (N, 1)
+        direction = self.gaze(face, device) # (N, 3, 224, 224) -> (N, 3)
 
         # infer gaze direction and normalized
-        norm = torch.norm(direction, 2, dim=1)
-        normalized_direction = direction / norm.view([-1, 1])
+        norm = torch.norm(direction[:, :2], 2, dim=1)
+        normalized_direction = direction[:, :2] / norm.view([-1, 1])
 
         # generate gaze field map
         batch_size, channel, height, width = gaze_field.size()
@@ -278,16 +278,12 @@ class ModelSpatial(nn.Module):
         # depth = depth * direction[:, 2].view([batch_size, -1, 1, 1])
             # get front, mid and back depth map by value
         for idx in range(batch_size):
-            if depth_scale[idx] > 0.3:
+            if direction[idx, 2] >= 0:
                 front = torch.clamp(depth[idx], min=0, max=1)
                 depth[idx] = front
-            elif depth_scale[idx] < -0.3:
+            else:
                 back = torch.clamp(depth[idx], min=-1, max=0)
                 depth[idx] = -back
-            else:
-                mid = 1 - 16 * torch.pow(depth[idx], 2)
-                mid = torch.clamp(mid, min=0, max=1)
-                depth[idx] = mid
 
         im = torch.cat((images, depth), dim=1)
         im = torch.cat((im, head), dim=1)
@@ -340,7 +336,7 @@ class ModelSpatial(nn.Module):
         x = self.conv4(x) # (N, 1, 64, 64) -> (N, 1, 64, 64)
 
         # x -> output heatmap, attn_weights -> mean of attention, encoding_inout -> in/out
-        return x, torch.mean(attn_weights, 1, keepdim=True), encoding_inout, direction, depth_scale, gaze_field_map
+        return x, torch.mean(attn_weights, 1, keepdim=True), encoding_inout, direction, gaze_field_map
 
 
 class ModelSpatioTemporal(nn.Module):
@@ -597,14 +593,6 @@ class GazeTR(nn.Module):
 
         self.base_model = resnet18(pretrained=False, maps=maps)
 
-        # encoding for depth
-        self.relu = nn.ReLU(inplace=True)
-        self.compress_conv1_depth = nn.Conv2d(32, 16, kernel_size=1, stride=1, padding=0, bias=False)
-        self.compress_bn1_depth = nn.BatchNorm2d(16)
-        self.compress_conv2_depth = nn.Conv2d(16, 1, kernel_size=1, stride=1, padding=0, bias=False)
-        self.compress_bn2_depth = nn.BatchNorm2d(1)
-        self.fc_depth = nn.Linear(49, 1)
-
         # d_model: dim of Q, K, V
         # nhead: seq num
         # dim_feedforward: dim of hidden linear layers
@@ -625,10 +613,11 @@ class GazeTR(nn.Module):
 
         self.pos_embedding = nn.Embedding(dim_feature+1, maps)
 
-        self.feed = nn.Linear(maps, 2)
+        self.feed = nn.Linear(maps, 3)
 
+        self.loss_op = nn.L1Loss()
         # Initialize weights
-        self.initialize_weights()
+        # self.initialize_weights()
 
     def initialize_weights(self):
         for m in self.modules():
@@ -642,17 +631,6 @@ class GazeTR(nn.Module):
 
     def forward(self, x_in, device):
         feature = self.base_model(x_in) # (N, 32, 7, 7)
-
-        # encoding for depth
-        depth = self.compress_conv1_depth(feature)
-        depth = self.compress_bn1_depth(depth)
-        depth = self.relu(depth)
-        depth = self.compress_conv2_depth(depth)
-        depth = self.compress_bn2_depth(depth)
-        depth = self.relu(depth)
-        depth = depth.view(-1, 49) # (N, 1, 7, 7) -> (N, 49)
-        depth = self.fc_depth(depth)
-
         batch_size = feature.size(0)
         feature = feature.flatten(2)
         feature = feature.permute(2, 0, 1)
@@ -673,4 +651,4 @@ class GazeTR(nn.Module):
 
         gaze = self.feed(feature)
 
-        return gaze, depth
+        return gaze

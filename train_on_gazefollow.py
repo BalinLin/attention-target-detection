@@ -64,14 +64,14 @@ def train():
     train_loader = torch.utils.data.DataLoader(dataset=train_dataset,
                                                batch_size=args.batch_size,
                                                shuffle=True,
-                                               num_workers=0)
+                                               num_workers=12)
 
     val_dataset = GazeFollow(gazefollow_val_data, gazefollow_val_depth, gazefollow_val_label,
                       transform, input_size=input_resolution, output_size=output_resolution, test=True)
     val_loader = torch.utils.data.DataLoader(dataset=val_dataset,
                                                batch_size=args.batch_size,
                                                shuffle=True,
-                                               num_workers=0)
+                                               num_workers=12)
 
     # Set up log dir
     logdir = os.path.join(args.log_dir,
@@ -99,7 +99,7 @@ def train():
     # Loss functions
     # MSE(https://blog.csdn.net/hao5335156/article/details/81029791)
     mse_loss = nn.MSELoss(reduce=False) # not reducing in order to ignore outside cases
-    L1_loss = nn.L1Loss(reduction='mean')
+    L1_loss = nn.L1Loss(reduce=False, reduction='mean') # not reducing in order to ignore outside cases
     bcelogit_loss = nn.BCEWithLogitsLoss()
     cosine_similarity = nn.CosineSimilarity()
 
@@ -158,7 +158,7 @@ def train():
             relative_depth = relative_depth.to(device)
 
             # predict heatmap(N, 1, 64, 64), mean of attention, in/out
-            gaze_heatmap_pred, attmap, inout_pred, direction, depth_scale, gaze_field_map = model(images, depth, head, faces, face_depth, gaze_field, device)
+            gaze_heatmap_pred, attmap, inout_pred, direction, gaze_field_map = model(images, depth, head, faces, face_depth, gaze_field, device)
             gaze_heatmap_pred = gaze_heatmap_pred.squeeze(1)
 
             # Loss
@@ -173,9 +173,13 @@ def train():
             Xent_loss = bcelogit_loss(inout_pred.squeeze(), gaze_inside.squeeze()) * loss_amp_factor_inout
                 # Angle loss
             gt_direction = gaze - eye
-            angle_loss = torch.mean(1 - cosine_similarity(direction, gt_direction)) * loss_amp_factor_angle
+            angle_loss = (1 - cosine_similarity(direction[:, :2], gt_direction)) * loss_amp_factor_angle
+            angle_loss = torch.mul(angle_loss, gaze_inside) # zero out loss when it's out-of-frame gaze case
+            angle_loss = torch.sum(angle_loss)/torch.sum(gaze_inside)
                 # depth loss
-            depth_loss = L1_loss(depth_scale, relative_depth) * loss_amp_factor_depth
+            depth_loss = L1_loss(direction[:, 2], relative_depth) * loss_amp_factor_depth
+            depth_loss = torch.mul(depth_loss, gaze_inside) # zero out loss when it's out-of-frame gaze case
+            depth_loss = torch.sum(depth_loss)/torch.sum(gaze_inside)
 
             total_loss = lambda_heatmap * l2_loss + lambda_angle * angle_loss + lambda_depth * depth_loss #+ Xent_loss
 
@@ -220,7 +224,7 @@ def train():
                         val_eye = val_eye.to(device)
 
                         # predict heatmap(N, 1, 64, 64), mean of attention, in/out
-                        val_gaze_heatmap_pred, val_attmap, val_inout_pred, val_direction, val_depth_scale, val_gaze_field_map = model(val_images, val_depth, val_head, val_faces, val_face_depth, val_gaze_field, device)
+                        val_gaze_heatmap_pred, val_attmap, val_inout_pred, val_direction, val_gaze_field_map = model(val_images, val_depth, val_head, val_faces, val_face_depth, val_gaze_field, device)
                         val_gaze_heatmap_pred = val_gaze_heatmap_pred.squeeze(1) # (N, 1, 64, 64) -> (N, 64, 64)
                         # Loss
                             # l2 loss computed only for inside case, test set only have inside case.
@@ -253,12 +257,13 @@ def train():
                                 gt_gaze = gt_gaze.to(device)
                                 # angle loss
                                 val_gt_direction_temp = gt_gaze - val_eye
-                                val_angle_loss_temp = torch.mean(1 - cosine_similarity(val_direction, val_gt_direction_temp)) * loss_amp_factor_angle
+                                val_angle_loss_temp = torch.mean(1 - cosine_similarity(val_direction[:, :2], val_gt_direction_temp)) * loss_amp_factor_angle
                                 val_angle_loss = val_angle_loss_temp if val_angle_loss > val_angle_loss_temp else val_angle_loss
                                 # depth loss
                                 x, y = int(gt_gaze[0] * input_resolution), int(gt_gaze[1] * input_resolution)
                                 val_relative_depth = val_depth[b_i, 0, x, y]
-                                val_depth_loss_temp = L1_loss(val_depth_scale, val_relative_depth) * loss_amp_factor_depth
+                                val_depth_loss_temp = L1_loss(val_direction[:, 2], val_relative_depth) * loss_amp_factor_depth
+                                val_depth_loss_temp = torch.mean(val_depth_loss_temp, dim=0) # (1)
                                 val_depth_loss = val_depth_loss_temp if val_depth_loss > val_depth_loss_temp else val_depth_loss
                             min_dist.append(min(all_distances))
                             # average distance: distance between the predicted point and human average point
@@ -305,7 +310,8 @@ def train():
 
                     # scheduler
                     scheduler_multistep.step()
-                    scheduler_plateau.step(val_total_loss)
+                    if ep >= 10:
+                        scheduler_plateau.step(val_total_loss)
 
 
         if ep % args.save_every == 0:
