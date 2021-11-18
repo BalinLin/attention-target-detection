@@ -256,14 +256,14 @@ def train():
                                 all_distances.append(evaluation.L2_dist(gt_gaze, norm_p))
                                 gt_gaze = gt_gaze.to(device)
                                 # angle loss
-                                val_gt_direction_temp = gt_gaze - val_eye
-                                val_angle_loss_temp = torch.mean(1 - cosine_similarity(val_direction[:, :2], val_gt_direction_temp)) * loss_amp_factor_angle
+                                # f_direction = pred - eye_point
+                                val_gt_direction_temp = gt_gaze - val_eye[b_i]
+                                val_angle_loss_temp = (1 - cosine_similarity(val_direction[b_i, :2].unsqueeze(0), val_gt_direction_temp.unsqueeze(0))) * loss_amp_factor_angle
                                 val_angle_loss = val_angle_loss_temp if val_angle_loss > val_angle_loss_temp else val_angle_loss
                                 # depth loss
                                 x, y = int(gt_gaze[0] * input_resolution), int(gt_gaze[1] * input_resolution)
                                 val_relative_depth = val_depth[b_i, 0, x, y]
-                                val_depth_loss_temp = L1_loss(val_direction[:, 2], val_relative_depth) * loss_amp_factor_depth
-                                val_depth_loss_temp = torch.mean(val_depth_loss_temp, dim=0) # (1)
+                                val_depth_loss_temp = L1_loss(val_direction[b_i, 2], val_relative_depth) * loss_amp_factor_depth
                                 val_depth_loss = val_depth_loss_temp if val_depth_loss > val_depth_loss_temp else val_depth_loss
                             min_dist.append(min(all_distances))
                             # average distance: distance between the predicted point and human average point
