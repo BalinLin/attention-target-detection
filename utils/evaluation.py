@@ -24,3 +24,12 @@ def argmax_pts(heatmap):
 
 def L2_dist(p1, p2):
     return np.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
+
+def angle_degree(gt, pred):
+    norm_pred = (pred[0] ** 2 + pred[1] ** 2) ** 0.5
+    norm_gt = (gt[0] ** 2 + gt[1] ** 2) ** 0.5
+
+    f_cos_sim = (pred[0] * gt[0] + pred[1] * gt[1]) / (norm_gt * norm_pred + 1e-6)
+    f_cos_sim = np.maximum(np.minimum(f_cos_sim, 1.0), -1.0)
+    f_angle = np.arccos(f_cos_sim) * 180 / np.pi
+    return f_angle

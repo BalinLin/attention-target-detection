@@ -201,7 +201,7 @@ def train():
             if (batch != 0 and batch % args.eval_every == 0) or batch+1 == max_steps:
                 print('Validation in progress ...')
                 model.train(False)
-                AUC = []; min_dist = []; avg_dist = []
+                AUC = []; min_dist = []; avg_dist = []; min_angle = []; avg_angle = []
                 with torch.no_grad():
                     # idx, (img, face, head_channel, gaze_heatmap, cont_gaze, imsize, path)
                         # img.shape -> (N, 3, 224, 224),
@@ -252,37 +252,49 @@ def train():
                             pred_x, pred_y = evaluation.argmax_pts(val_gaze_heatmap_pred[b_i]) # return index of max heatmap value
                             norm_p = [pred_x/float(output_resolution), pred_y/float(output_resolution)]
                             all_distances = []
+                            all_angle = []
+                            val_direction_cpu = val_direction[b_i, :2].cpu()
                             for gt_gaze in valid_gaze:
+                                # L2 dist
                                 all_distances.append(evaluation.L2_dist(gt_gaze, norm_p))
                                 gt_gaze = gt_gaze.to(device)
                                 # angle loss
-                                # f_direction = pred - eye_point
-                                val_gt_direction_temp = gt_gaze - val_eye[b_i]
-                                val_angle_loss_temp = (1 - cosine_similarity(val_direction[b_i, :2].unsqueeze(0), val_gt_direction_temp.unsqueeze(0))) * loss_amp_factor_angle
+                                val_gt_direction = gt_gaze - val_eye[b_i]
+                                val_angle_loss_temp = (1 - cosine_similarity(val_direction[b_i, :2].unsqueeze(0), val_gt_direction.unsqueeze(0))) * loss_amp_factor_angle
                                 val_angle_loss = val_angle_loss_temp if val_angle_loss > val_angle_loss_temp else val_angle_loss
                                 # depth loss
                                 x, y = int(gt_gaze[0] * input_resolution), int(gt_gaze[1] * input_resolution)
                                 val_relative_depth = val_depth[b_i, 0, x, y]
                                 val_depth_loss_temp = L1_loss(val_direction[b_i, 2], val_relative_depth) * loss_amp_factor_depth
                                 val_depth_loss = val_depth_loss_temp if val_depth_loss > val_depth_loss_temp else val_depth_loss
+
+                                # angle
+                                all_angle.append(evaluation.angle_degree(val_gt_direction.cpu(), val_direction_cpu))
+
                             min_dist.append(min(all_distances))
+                            min_angle.append(min(all_angle))
                             # average distance: distance between the predicted point and human average point
                             mean_gt_gaze = torch.mean(valid_gaze, 0)
-                            avg_distance = evaluation.L2_dist(mean_gt_gaze, norm_p)
-                            avg_dist.append(avg_distance)
+                            mean_gt_direction = mean_gt_gaze - val_eye[b_i].cpu()
+                            avg_dist.append(evaluation.L2_dist(mean_gt_gaze, norm_p))
+                            avg_angle.append(evaluation.angle_degree(mean_gt_direction, val_direction_cpu))
 
                         val_total_loss = lambda_heatmap * val_l2_loss + lambda_angle * val_angle_loss + lambda_depth * val_depth_loss #+ Xent_loss
 
-                print("\tAUC:{:.4f}\tmin dist:{:.4f}\tavg dist:{:.4f}".format(
+                print("\tAUC:{:.4f}\tmin dist:{:.4f}\tavg dist:{:.4f}\tmin angle:{:.4f}\tavg angle:{:.4f}".format(
                       torch.mean(torch.tensor(AUC)),
                       torch.mean(torch.tensor(min_dist)),
-                      torch.mean(torch.tensor(avg_dist))))
+                      torch.mean(torch.tensor(avg_dist)),
+                      torch.mean(torch.tensor(min_angle)),
+                      torch.mean(torch.tensor(avg_angle))))
 
                 # Tensorboard
                 val_ind = np.random.choice(len(val_images), replace=False)
                 writer.add_scalar('Validation AUC', torch.mean(torch.tensor(AUC)), global_step=step)
                 writer.add_scalar('Validation min dist', torch.mean(torch.tensor(min_dist)), global_step=step)
                 writer.add_scalar('Validation avg dist', torch.mean(torch.tensor(avg_dist)), global_step=step)
+                writer.add_scalar('Validation min angle', torch.mean(torch.tensor(min_angle)), global_step=step)
+                writer.add_scalar('Validation avg angle', torch.mean(torch.tensor(avg_angle)), global_step=step)
 
                 if batch+1 == max_steps:
                     # wandb loss
@@ -302,7 +314,9 @@ def train():
                     wandb.log({"Validation Loss": val_total_loss,
                             "Validation AUC": torch.mean(torch.tensor(AUC)),
                             "Validation min dist": torch.mean(torch.tensor(min_dist)),
-                            "Validation avg dist": torch.mean(torch.tensor(avg_dist))},
+                            "Validation avg dist": torch.mean(torch.tensor(avg_dist)),
+                            "Validation min angle": torch.mean(torch.tensor(min_angle)),
+                            "Validation avg angle": torch.mean(torch.tensor(avg_angle))},
                             step=(ep+1))
 
                     # wandb learning rate

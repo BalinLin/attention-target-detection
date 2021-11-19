@@ -616,18 +616,6 @@ class GazeTR(nn.Module):
         self.feed = nn.Linear(maps, 3)
 
         self.loss_op = nn.L1Loss()
-        # Initialize weights
-        # self.initialize_weights()
-
-    def initialize_weights(self):
-        for m in self.modules():
-            if isinstance(m, nn.Linear) or isinstance(m, nn.Conv2d) or isinstance(m, nn.ConvTranspose2d):
-                nn.init.xavier_uniform_(m.weight)
-                if m.bias is not None:
-                    m.bias.data.zero_()
-            elif isinstance(m, nn.BatchNorm2d):
-                m.weight.data.fill_(1)
-                m.bias.data.zero_()
 
     def forward(self, x_in, device):
         feature = self.base_model(x_in) # (N, 32, 7, 7)
