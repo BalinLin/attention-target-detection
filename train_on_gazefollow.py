@@ -120,9 +120,9 @@ def train():
     loss_amp_factor_inout = 100 # multiplied to the loss to prevent underflow
     loss_amp_factor_angle = 100 # multiplied to the loss to prevent underflow
     loss_amp_factor_depth = 100 # multiplied to the loss to prevent underflow
-    lambda_heatmap = 0.5 # weight for heatmap loss
-    lambda_angle = 0.5 # weight for angle loss
-    lambda_depth = 0.5 # weight for depth loss
+    lambda_heatmap = 1 # weight for heatmap loss
+    lambda_angle = 1 # weight for angle loss
+    lambda_depth = 1 # weight for depth loss
 
     max_steps = len(train_loader)
     optimizer.zero_grad()
