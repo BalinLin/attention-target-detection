@@ -277,17 +277,18 @@ class ModelSpatial(nn.Module):
         # im = torch.cat((images, depth * gaze_field_map, depth * gaze_field_map_2, depth * gaze_field_map_3), dim=1)
         # depth = depth * direction[:, 2].view([batch_size, -1, 1, 1])
             # get front, mid and back depth map by value
+        offset = 0.2
         for idx in range(batch_size):
             if direction[idx, 2] >= 0:
                 front = depth[idx]
-                mask = front > -0.3
-                front[mask] += 0.3
+                mask = front > -offset
+                front[mask] += offset
                 front = torch.clamp(front, min=0, max=1)
                 depth[idx] = front
             else:
                 back = depth[idx]
-                mask = back < 0.3
-                back[mask] -= 0.3
+                mask = back < offset
+                back[mask] -= offset
                 back = torch.clamp(depth[idx], min=-1, max=0)
                 depth[idx] = back
 
