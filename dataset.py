@@ -113,12 +113,9 @@ class GazeFollow(Dataset):
         width, height = img.size
         x_min, y_min, x_max, y_max = map(float, [x_min, y_min, x_max, y_max]) # map type to float
 
-        # get eye and gaze depth for rebasing depth
-        depth_eye_x, depth_eye_y = int(eye_x * width), int(eye_y * height)
-        head_depth = depth.getpixel((depth_eye_x, depth_eye_y)) / 256
-
+        # get gaze depth for rebasing depth
         depth_gaze_x, depth_gaze_y = int(gaze_x * width), int(gaze_y * height)
-        relative_depth = depth.getpixel((depth_gaze_x, depth_gaze_y)) / 256 - head_depth
+        relative_depth = depth.getpixel((depth_gaze_x, depth_gaze_y)) / 256
 
         if self.imshow:
             img.save("origin_img.jpg")
@@ -206,6 +203,14 @@ class GazeFollow(Dataset):
         face = img.crop((int(x_min), int(y_min), int(x_max), int(y_max)))
         face_depth = depth.crop((int(x_min), int(y_min), int(x_max), int(y_max)))
 
+        # Rebasing offset
+        head_depth_arr = np.asarray(face_depth)
+        pixel_num = int(x_max - x_min) * int(y_max - y_min)
+        head_depth = head_depth_arr.sum()
+        head_depth = head_depth /  pixel_num / 256 if isinstance(head_depth, np.integer) else 0
+
+        relative_depth -= head_depth
+
         if self.imshow:
             img.save("img_aug.jpg")
             depth.save("depth_aug.jpg")
@@ -270,14 +275,15 @@ class GazeFollow(Dataset):
 
 
 class VideoAttTarget_video(Dataset):
-    def __init__(self, data_dir, annotation_dir, transform, input_size=input_resolution, output_size=output_resolution,
+    def __init__(self, data_dir, depth_dir, annotation_dir, transform, input_size=input_resolution, output_size=output_resolution,
                  test=False, imshow=False, seq_len_limit=400):
         shows = glob.glob(os.path.join(annotation_dir, '*'))
-        self.all_sequence_paths = []
+        self.all_sequence_paths = []  # all of annotation txt path
         for s in shows:
             sequence_annotations = glob.glob(os.path.join(s, '*', '*.txt'))
             self.all_sequence_paths.extend(sequence_annotations)
         self.data_dir = data_dir
+        self.depth_dir = depth_dir
         self.transform = transform
         self.input_size = input_size
         self.output_size = output_size
@@ -290,7 +296,7 @@ class VideoAttTarget_video(Dataset):
         sequence_path = self.all_sequence_paths[index]
         df = pd.read_csv(sequence_path, header=None, index_col=False,
                          names=['path', 'xmin', 'ymin', 'xmax', 'ymax', 'gazex', 'gazey'])
-        show_name = sequence_path.split('/')[-3]
+        show_name = sequence_path.split('/')[-3]  # annotation_dir/show_name/clip/seq.txt
         clip = sequence_path.split('/')[-2]
         seq_len = len(df.index)
 
@@ -367,7 +373,7 @@ class VideoAttTarget_video(Dataset):
             sampled_ind = 0
 
 
-        faces, images, head_channels, heatmaps, paths, gazes, imsizes, gaze_inouts = [], [], [], [], [], [], [], []
+        images, depths, faces, face_depths, head_channels, heatmaps, gaze_fields, paths, gazes, imsizes, gaze_inouts = [], [], [], [], [], [], [], [], [], [], []
         index_tracker = -1
         for i, row in df.iterrows():
             index_tracker = index_tracker+1
@@ -385,6 +391,10 @@ class VideoAttTarget_video(Dataset):
             impath = os.path.join(self.data_dir, show_name, clip, row['path'])
             img = Image.open(impath)
             img = img.convert('RGB')
+
+            dppath = os.path.join(self.depth_dir, show_name, clip, row['path'])
+            depth = Image.open(dppath)
+            depth = depth.convert('L')
 
             width, height = img.size
             imsize = torch.FloatTensor([width, height])
@@ -419,6 +429,7 @@ class VideoAttTarget_video(Dataset):
                 if cond_crop < 0.5:
                     # Crop it
                     img = TF.crop(img, crop_y_min, crop_x_min, crop_height, crop_width)
+                    depth = TF.crop(depth, crop_y_min, crop_x_min, crop_height, crop_width)
 
                     # Record the crop's (x, y) offset
                     offset_x, offset_y = crop_x_min, crop_y_min
@@ -436,6 +447,7 @@ class VideoAttTarget_video(Dataset):
                 # Flip?
                 if cond_flip < 0.5:
                     img = img.transpose(Image.FLIP_LEFT_RIGHT)
+                    depth = depth.transpose(Image.FLIP_LEFT_RIGHT)
                     x_max_2 = width - face_x1
                     x_min_2 = width - face_x2
                     face_x2 = x_max_2
@@ -449,15 +461,38 @@ class VideoAttTarget_video(Dataset):
                     img = TF.adjust_contrast(img, contrast_factor=n2)
                     img = TF.adjust_saturation(img, saturation_factor=n3)
 
-            # Face crop
-            face = img.copy().crop((int(face_x1), int(face_y1), int(face_x2), int(face_y2)))
-
             # Head channel image
             head_channel = imutils.get_head_box_channel(face_x1, face_y1, face_x2, face_y2, width, height,
                                                         resolution=self.input_size, coordconv=False).unsqueeze(0)
+
+            # Face crop
+            face = img.copy().crop((int(face_x1), int(face_y1), int(face_x2), int(face_y2)))
+            face_depth = depth.copy().crop((int(face_x1), int(face_y1), int(face_x2), int(face_y2)))
+
+            # Rebasing offset
+            head_depth_arr = np.asarray(face_depth)
+            pixel_num = int(face_x2 - face_x1) * int(face_y2 - face_y1)
+            head_depth = head_depth_arr.sum()
+            head_depth = head_depth /  pixel_num / 256  if isinstance(head_depth, np.integer) else 0
+
+            # generate gaze field for fov
+            eye = [(face_x2 + face_x1) / 2 / width, (face_y2 + face_y1) / 2 / height]
+            gaze_field = generate_data_field(eye_point = eye, input_size = self.input_size)
+
             if self.transform is not None:
+                transform_list = []
+                transform_list.append(transforms.Resize((input_resolution, input_resolution)))
+                transform_list.append(transforms.ToTensor())
+                transform_depth = transforms.Compose(transform_list)
+
                 img = self.transform(img)
                 face = self.transform(face)
+
+                depth = transform_depth(depth)
+                depth = depth - head_depth # rebased
+
+                face_depth = transform_depth(face_depth)
+                face_depth = face_depth - head_depth # rebased
 
             # Deconv output
             if gaze_inside:
@@ -471,10 +506,14 @@ class VideoAttTarget_video(Dataset):
             else:
                 gaze_map = torch.zeros(self.output_size, self.output_size)
                 gazes.append(torch.FloatTensor([-1, -1]))
-            faces.append(face)
+
             images.append(img)
+            depths.append(depth)
+            faces.append(face)
+            face_depths.append(face_depth)
             head_channels.append(head_channel)
             heatmaps.append(gaze_map)
+            gaze_fields.append(torch.from_numpy(gaze_field))
             gaze_inouts.append(torch.FloatTensor([int(gaze_inside)]))
 
         if self.imshow:
@@ -488,19 +527,23 @@ class VideoAttTarget_video(Dataset):
                 plt.savefig(os.path.join('debug', 'viz_%d_inout=%d.png' % (i, gaze_inouts[i])))
                 plt.close('all')
 
-        faces = torch.stack(faces)
         images = torch.stack(images)
+        depths = torch.stack(depths)
+        faces = torch.stack(faces)
+        face_depths = torch.stack(face_depths)
         head_channels = torch.stack(head_channels)
         heatmaps = torch.stack(heatmaps)
+        gaze_fields = torch.stack(gaze_fields)
         gazes = torch.stack(gazes)
         gaze_inouts = torch.stack(gaze_inouts)
         # imsizes = torch.stack(imsizes)
+        # torch.Size([seq_len_limit_config, 3, 224, 224]) torch.Size([seq_len_limit_config, 3, 224, 224]) torch.Size([seq_len_limit_config, 1, 224, 224]) torch.Size([seq_len_limit_config, 64, 64])
         # print(faces.shape, images.shape, head_channels.shape, heatmaps.shape)
 
         if self.test:
-            return images, faces, head_channels, heatmaps, gazes, gaze_inouts
+            return images, depths, faces, face_depths, head_channels, heatmaps, gaze_fields, gazes, gaze_inouts
         else: # train
-            return images, faces, head_channels, heatmaps, gaze_inouts
+            return images, depths, faces, face_depths, head_channels, heatmaps, gaze_fields, gaze_inouts
 
     def __len__(self):
         return self.length

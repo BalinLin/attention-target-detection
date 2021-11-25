@@ -28,6 +28,7 @@ parser.add_argument("--device", type=int, default=0, help="gpu id")
 parser.add_argument("--init_weights", type=str, default="", help="initial weights")
 parser.add_argument("--lr", type=float, default=1e-6, help="learning rate")
 parser.add_argument("--batch_size", type=int, default=48, help="batch size")
+parser.add_argument("--num_worker", type=int, default=12, help="batch size")
 parser.add_argument("--epochs", type=int, default=70, help="number of epochs")
 parser.add_argument("--print_every", type=int, default=100, help="print every ___ iterations")
 parser.add_argument("--eval_every", type=int, default=50000, help="evaluate every ___ iterations")
@@ -64,14 +65,14 @@ def train():
     train_loader = torch.utils.data.DataLoader(dataset=train_dataset,
                                                batch_size=args.batch_size,
                                                shuffle=True,
-                                               num_workers=12)
+                                               num_workers=args.num_worker)
 
     val_dataset = GazeFollow(gazefollow_val_data, gazefollow_val_depth, gazefollow_val_label,
                       transform, input_size=input_resolution, output_size=output_resolution, test=True)
     val_loader = torch.utils.data.DataLoader(dataset=val_dataset,
                                                batch_size=args.batch_size,
                                                shuffle=True,
-                                               num_workers=12)
+                                               num_workers=args.num_worker)
 
     # Set up log dir
     logdir = os.path.join(args.log_dir,

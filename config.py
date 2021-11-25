@@ -13,8 +13,10 @@ gazefollow_val_label = "data/gazefollow/test_annotations_release.txt"
 # VideoAttTarget dataset dir config
 # =============================================================================
 videoattentiontarget_train_data = "data/videoatttarget/images"
+videoattentiontarget_train_depth = "data/videoatttarget/images_depth_1_with_norm"
 videoattentiontarget_train_label = "data/videoatttarget/annotations/train"
 videoattentiontarget_val_data = "data/videoatttarget/images"
+videoattentiontarget_val_depth = "data/videoatttarget/images_depth_1_with_norm"
 videoattentiontarget_val_label = "data/videoatttarget/annotations/test"
 
 
@@ -23,3 +25,4 @@ videoattentiontarget_val_label = "data/videoatttarget/annotations/test"
 # =============================================================================
 input_resolution = 224
 output_resolution = 64
+seq_len_limit_config = 50
