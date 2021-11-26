@@ -125,6 +125,7 @@ def train():
     lambda_angle = 1 # weight for angle loss
     lambda_angle_heatmap = 1 # weight for angle heatmap loss
     lambda_depth = 1 # weight for depth loss
+    threshold = 0.5
 
     max_steps = len(train_loader)
     optimizer.zero_grad()
@@ -177,7 +178,7 @@ def train():
             gt_direction = gaze - eye
             angle_loss = (1 - cosine_similarity(direction[:, :2], gt_direction)) * loss_amp_factor_angle
             angle_loss = torch.mul(angle_loss, gaze_inside) # zero out loss when it's out-of-frame gaze case
-            angle_loss = torch.sum(angle_loss)/torch.sum(gaze_inside)
+            # angle_loss = torch.sum(angle_loss)/torch.sum(gaze_inside)
 
                 # Angle heatmap loss
             angle_heatmap_pred = imutils.generate_angle_heatmap(direction, args.batch_size, angle_heatmap_width, angle_heatmap_heigh, angle_heatmap_gamma).to(device)
@@ -186,15 +187,21 @@ def train():
             angle_heatmap_loss = torch.mean(angle_heatmap_loss, dim=1) # (N, 180)
             angle_heatmap_loss = torch.mean(angle_heatmap_loss, dim=1) # (N)
             angle_heatmap_loss = torch.mul(angle_heatmap_loss, gaze_inside) # zero out loss when it's out-of-frame gaze case
-            angle_heatmap_loss = torch.sum(angle_heatmap_loss)/torch.sum(gaze_inside)
+            # angle_heatmap_loss = torch.sum(angle_heatmap_loss)/torch.sum(gaze_inside)
 
                 # depth loss
             depth_loss = L1_loss(direction[:, 2], relative_depth) * loss_amp_factor_depth
             depth_loss = torch.mul(depth_loss, gaze_inside) # zero out loss when it's out-of-frame gaze case
             depth_loss = torch.sum(depth_loss)/torch.sum(gaze_inside)
 
-            total_loss = lambda_heatmap * l2_loss + lambda_angle * angle_loss + \
-                         lambda_angle_heatmap * angle_heatmap_loss + lambda_depth * depth_loss #+ Xent_loss
+            norm_direction = torch.norm(gt_direction, dim=1)
+            mask = norm_direction < threshold
+            total_angle_loss = angle_loss
+            total_angle_loss[mask] = angle_heatmap_loss[mask]
+            total_angle_loss = torch.sum(total_angle_loss)/torch.sum(gaze_inside)
+
+            total_loss = lambda_heatmap * l2_loss + lambda_angle * total_angle_loss + \
+                         lambda_depth * depth_loss #+ Xent_loss
 
             # NOTE: summed loss is used to train the main model.
             #       l2_loss is used to get SOTA on GazeFollow benchmark.
@@ -246,7 +253,7 @@ def train():
                         val_l2_loss = mse_loss(val_gaze_heatmap_pred, val_gaze_heatmap) * loss_amp_factor_mse # (N, 64, 64)
                         val_l2_loss = torch.mean(val_l2_loss, dim=1) # (N, 64)
                         val_l2_loss = torch.mean(val_l2_loss, dim=1) # (N)
-                        val_l2_loss = torch.mean(val_l2_loss, dim=0) # (1)
+                        # val_l2_loss = torch.mean(val_l2_loss, dim=0) # (1)
                             # Angle loss
                         val_angle_loss = torch.tensor(float('inf')).to(device)
                         val_depth_loss = torch.tensor(float('inf')).to(device)
@@ -258,7 +265,9 @@ def train():
                         val_angle_heatmap_loss = mse_loss(val_angle_heatmap_pred, val_angle_heatmap) * loss_amp_factor_mse # (N, 180, 180)
                         val_angle_heatmap_loss = torch.mean(val_angle_heatmap_loss, dim=1) # (N, 180)
                         val_angle_heatmap_loss = torch.mean(val_angle_heatmap_loss, dim=1) # (N)
-                        val_angle_heatmap_loss = torch.mean(val_angle_heatmap_loss, dim=0) # (1)
+                        # val_angle_heatmap_loss = torch.mean(val_angle_heatmap_loss, dim=0) # (1)
+
+                        min_norm = []
 
                         # go through each data point and record AUC, min dist, avg dist
                         for b_i in range(len(cont_gaze)):
@@ -275,6 +284,7 @@ def train():
                             norm_p = [pred_x/float(output_resolution), pred_y/float(output_resolution)]
                             all_distances = []
                             all_angle = []
+                            all_norm = []
                             val_direction_cpu = val_direction[b_i, :2].cpu()
                             for gt_gaze in valid_gaze:
                                 # L2 dist
@@ -282,6 +292,7 @@ def train():
                                 gt_gaze = gt_gaze.to(device)
                                 # angle loss
                                 val_gt_direction = gt_gaze - val_eye[b_i]
+                                all_norm.append(torch.norm(val_gt_direction))
                                 val_angle_loss_temp = (1 - cosine_similarity(val_direction[b_i, :2].unsqueeze(0), val_gt_direction.unsqueeze(0))) * loss_amp_factor_angle
                                 val_angle_loss = val_angle_loss_temp if val_angle_loss > val_angle_loss_temp else val_angle_loss
                                 # depth loss
@@ -295,14 +306,20 @@ def train():
 
                             min_dist.append(min(all_distances))
                             min_angle.append(min(all_angle))
+                            min_norm.append(min(all_norm))
                             # average distance: distance between the predicted point and human average point
                             mean_gt_gaze = torch.mean(valid_gaze, 0)
                             mean_gt_direction = mean_gt_gaze - val_eye[b_i].cpu()
                             avg_dist.append(evaluation.L2_dist(mean_gt_gaze, norm_p))
                             avg_angle.append(evaluation.angle_degree(mean_gt_direction, val_direction_cpu))
 
-                        val_total_loss = lambda_heatmap * val_l2_loss + lambda_angle * val_angle_loss + \
-                                         lambda_angle_heatmap * val_angle_heatmap_loss + lambda_depth * val_depth_loss #+ Xent_loss
+                        val_mask = torch.FloatTensor(min_norm) < threshold
+                        val_total_angle_loss = val_l2_loss
+                        val_total_angle_loss[val_mask] = val_angle_heatmap_loss[val_mask]
+                        val_total_angle_loss = torch.mean(val_total_angle_loss, dim=0)
+
+                        val_total_loss = lambda_heatmap * val_l2_loss + lambda_angle * val_total_angle_loss + \
+                                         lambda_depth * val_depth_loss #+ Xent_loss
 
                 print("\tAUC:{:.4f}\tmin dist:{:.4f}\tavg dist:{:.4f}\tmin angle:{:.4f}\tavg angle:{:.4f}".format(
                       torch.mean(torch.tensor(AUC)),
