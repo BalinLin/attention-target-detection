@@ -159,6 +159,7 @@ def train():
             eye = eye.to(device)
             gaze = gaze.to(device)
             relative_depth = relative_depth.to(device)
+            batchsize = img.size(0)
 
             # predict heatmap(N, 1, 64, 64), mean of attention, in/out
             gaze_heatmap_pred, attmap, inout_pred, direction, gaze_field_map = model(images, depth, head, faces, face_depth, gaze_field, device)
@@ -181,8 +182,8 @@ def train():
             # angle_loss = torch.sum(angle_loss)/torch.sum(gaze_inside)
 
                 # Angle heatmap loss
-            angle_heatmap_pred = imutils.generate_angle_heatmap(direction, args.batch_size, angle_heatmap_width, angle_heatmap_heigh, angle_heatmap_gamma).to(device)
-            angle_heatmap = imutils.generate_angle_heatmap(gt_direction, args.batch_size, angle_heatmap_width, angle_heatmap_heigh, angle_heatmap_gamma).to(device)
+            angle_heatmap_pred = imutils.generate_angle_heatmap(direction, batchsize, angle_heatmap_width, angle_heatmap_heigh, angle_heatmap_gamma).to(device)
+            angle_heatmap = imutils.generate_angle_heatmap(gt_direction, batchsize, angle_heatmap_width, angle_heatmap_heigh, angle_heatmap_gamma).to(device)
             angle_heatmap_loss = mse_loss(angle_heatmap_pred, angle_heatmap) * loss_amp_factor_mse # (N, 180, 180)
             angle_heatmap_loss = torch.mean(angle_heatmap_loss, dim=1) # (N, 180)
             angle_heatmap_loss = torch.mean(angle_heatmap_loss, dim=1) # (N)
