@@ -26,3 +26,6 @@ videoattentiontarget_val_label = "data/videoatttarget/annotations/test"
 input_resolution = 224
 output_resolution = 64
 seq_len_limit_config = 50
+angle_heatmap_width = 180
+angle_heatmap_heigh = 180
+angle_heatmap_gamma = 10
