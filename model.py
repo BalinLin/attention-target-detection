@@ -290,7 +290,7 @@ class ModelSpatial(nn.Module):
                 mask = back < offset
                 back[mask] -= offset
                 back = torch.clamp(depth[idx], min=-1, max=0)
-                depth[idx] = -back
+                depth[idx] = back
 
         im = torch.cat((images, depth), dim=1)
         im = torch.cat((im, head), dim=1)
