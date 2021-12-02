@@ -318,6 +318,7 @@ def train():
                         val_total_angle_loss = val_l2_loss
                         val_total_angle_loss[val_mask] = val_angle_heatmap_loss[val_mask]
                         val_total_angle_loss = torch.mean(val_total_angle_loss, dim=0)
+                        val_l2_loss = torch.mean(val_l2_loss, dim=0) # (1)
 
                         val_total_loss = lambda_heatmap * val_l2_loss + lambda_angle * val_total_angle_loss + \
                                          lambda_depth * val_depth_loss #+ Xent_loss
