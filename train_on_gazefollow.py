@@ -117,7 +117,7 @@ def train():
     # scheduler_plateau = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.8, patience=5, min_lr=1e-7, verbose=False)
 
     step = 0
-    loss_amp_factor_mse = 10000 # multiplied to the loss to prevent underflow
+    loss_amp_factor_mse = 1000 # multiplied to the loss to prevent underflow
     loss_amp_factor_inout = 100 # multiplied to the loss to prevent underflow
     loss_amp_factor_angle = 100 # multiplied to the loss to prevent underflow
     loss_amp_factor_depth = 100 # multiplied to the loss to prevent underflow
