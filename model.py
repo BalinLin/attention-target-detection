@@ -279,17 +279,18 @@ class ModelSpatial(nn.Module):
             # get front, mid and back depth map by value
         offset = 0.3
         for idx in range(batch_size):
-            if direction[idx, 2] >= 0:
+            d = direction[idx, 2].detach().clone()
+            if d >= 0:
                 front = depth[idx]
                 mask = front > -offset
-                front[mask] += offset
-                front = torch.clamp(front, min=0, max=1)
+                front[mask] += (offset - d)
+                front = torch.clamp(front, min=0)
                 depth[idx] = front
             else:
                 back = depth[idx]
                 mask = back < offset
-                back[mask] -= offset
-                back = torch.clamp(depth[idx], min=-1, max=0)
+                back[mask] -= (offset + d)
+                back = torch.clamp(depth[idx], max=0)
                 depth[idx] = back
 
         im = torch.cat((images, depth), dim=1)
