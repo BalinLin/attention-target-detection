@@ -145,12 +145,15 @@ def train():
             # eye.shape -> (N, 2)
             # gaze.shape -> (N, 2)
             # relative_depth.shape -> (N, 1)
-        for batch, (img, dep, face, face_dep, head_channel, gaze_heatmap, gaze_field, eye, gaze, name, gaze_inside, relative_depth) in enumerate(train_loader):
+        for batch, (img, dep, face, woflip, face_dep, head_channel, gaze_heatmap, gaze_field, eye, gaze, name, gaze_inside, relative_depth) in enumerate(train_loader):
             model.train(True) # https://stackoverflow.com/questions/51433378/what-does-model-train-do-in-pytorch
             images = img.to(device)
             depth = dep.to(device)
             head = head_channel.to(device)
             faces = face.to(device)
+            woflip_face = woflip['face'].to(device)
+            woflip_gaze = woflip['gaze'].to(device)
+            woflip_eye = woflip['eye'].to(device)
             face_depth = face_dep.to(device)
             gaze_heatmap = gaze_heatmap.to(device)
             gaze_field = gaze_field.to(device)
@@ -160,6 +163,7 @@ def train():
 
             # predict heatmap(N, 1, 64, 64), mean of attention, in/out
             gaze_heatmap_pred, attmap, inout_pred, direction, gaze_field_map = model(images, depth, head, faces, face_depth, gaze_field, device)
+            direction_2 = model.gaze(woflip_face, device)
             gaze_heatmap_pred = gaze_heatmap_pred.squeeze(1)
 
             # Loss
@@ -172,11 +176,24 @@ def train():
             l2_loss = torch.sum(l2_loss)/torch.sum(gaze_inside)
                 # cross entropy loss for in vs out
             Xent_loss = bcelogit_loss(inout_pred.squeeze(), gaze_inside.squeeze()) * loss_amp_factor_inout
-                # Angle loss
+                # Angle loss 1
             gt_direction = gaze - eye
-            angle_loss = (1 - cosine_similarity(direction[:, :2], gt_direction)) * loss_amp_factor_angle
-            angle_loss = torch.mul(angle_loss, gaze_inside) # zero out loss when it's out-of-frame gaze case
-            angle_loss = torch.sum(angle_loss)/torch.sum(gaze_inside)
+            angle_loss_1 = (1 - cosine_similarity(direction[:, :2], gt_direction)) * loss_amp_factor_angle
+            angle_loss_1 = torch.mul(angle_loss_1, gaze_inside) # zero out loss when it's out-of-frame gaze case
+            angle_loss_1 = torch.sum(angle_loss_1)/torch.sum(gaze_inside)
+                # Angle loss 2
+            gt_direction_2 = woflip_gaze - woflip_eye
+            angle_loss_2 = (1 - cosine_similarity(direction_2[:, :2], gt_direction_2)) * loss_amp_factor_angle
+            angle_loss_2 = torch.mul(angle_loss_2, gaze_inside) # zero out loss when it's out-of-frame gaze case
+            angle_loss_2 = torch.sum(angle_loss_2)/torch.sum(gaze_inside)
+                # Angle equivalent
+            direction_eq = torch.cat((-direction_2[:, 0:1], direction_2[:, 1:2]), dim=1)
+            angle_loss_eq = (1 - cosine_similarity(direction[:, :2], direction_eq)) * loss_amp_factor_angle
+            angle_loss_eq = torch.mul(angle_loss_eq, gaze_inside) # zero out loss when it's out-of-frame gaze case
+            angle_loss_eq = torch.sum(angle_loss_eq)/torch.sum(gaze_inside)
+                # Angle all
+            angle_loss = (angle_loss_1 + angle_loss_2) / 2 + angle_loss_eq * 0.1
+
                 # depth loss
             depth_loss = L1_loss(direction[:, 2], relative_depth) * loss_amp_factor_depth
             depth_loss = torch.mul(depth_loss, gaze_inside) # zero out loss when it's out-of-frame gaze case

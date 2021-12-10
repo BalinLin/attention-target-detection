@@ -112,6 +112,7 @@ class GazeFollow(Dataset):
         depth = depth.convert('L')
         width, height = img.size
         x_min, y_min, x_max, y_max = map(float, [x_min, y_min, x_max, y_max]) # map type to float
+        woflip = {}
 
         # get gaze depth for rebasing depth
         depth_gaze_x, depth_gaze_y = int(gaze_x * width), int(gaze_y * height)
@@ -180,6 +181,9 @@ class GazeFollow(Dataset):
 
             # Random flip
             if np.random.random_sample() <= 0.5:
+                woflip['face'] = img.crop((int(x_min), int(y_min), int(x_max), int(y_max)))
+                woflip['gaze'] = torch.FloatTensor([gaze_x, gaze_y])
+                woflip['eye'] = torch.FloatTensor([eye_x, eye_y])
                 img = img.transpose(Image.FLIP_LEFT_RIGHT)
                 depth = depth.transpose(Image.FLIP_LEFT_RIGHT)
                 x_max_2 = width - x_min
@@ -188,6 +192,10 @@ class GazeFollow(Dataset):
                 x_min = x_min_2
                 gaze_x = 1 - gaze_x
                 eye_x = 1 - eye_x
+            else:
+                woflip['face'] = img.transpose(Image.FLIP_LEFT_RIGHT).crop((int(x_min), int(y_min), int(x_max), int(y_max)))
+                woflip['gaze'] = torch.FloatTensor([1 - gaze_x, gaze_y])
+                woflip['eye'] = torch.FloatTensor([1 - eye_x, eye_y])
 
             # Random color change
             if np.random.random_sample() <= 0.5:
@@ -225,6 +233,8 @@ class GazeFollow(Dataset):
 
             img = self.transform(img)
             face = self.transform(face)
+            if not self.test:
+                woflip['face'] = self.transform(woflip['face'])
 
             depth = transform_depth(depth)
             depth = depth - head_depth # rebased
@@ -268,7 +278,7 @@ class GazeFollow(Dataset):
         if self.test:
             return img, depth, face, face_depth, head_channel, gaze_heatmap, torch.from_numpy(gaze_field), torch.FloatTensor(eye), cont_gaze, imsize, path
         else:
-            return img, depth, face, face_depth, head_channel, gaze_heatmap, torch.from_numpy(gaze_field), torch.FloatTensor(eye), torch.FloatTensor(gaze), path, gaze_inside, relative_depth
+            return img, depth, face, woflip, face_depth, head_channel, gaze_heatmap, torch.from_numpy(gaze_field), torch.FloatTensor(eye), torch.FloatTensor(gaze), path, gaze_inside, relative_depth
 
     def __len__(self):
         return self.length
