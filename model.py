@@ -7,7 +7,7 @@ import math
 import copy
 from lib.pytorch_convolutional_rnn import convolutional_rnn
 import numpy as np
-from resnet import resnet18
+import resnet as M
 
 # https://pytorch.org/docs/stable/generated/torch.nn.Conv2d.html
 class Bottleneck(nn.Module):
@@ -555,7 +555,9 @@ def _get_clones(module, N):
 class GazeNet(nn.Module):
     def __init__(self):
         super(GazeNet, self).__init__()
-        self.face_net = resnet18(pretrained=False, maps=512)
+        self.face_net = M.resnet50(pretrained=True)
+        self.face_process = nn.Sequential(nn.Linear(2048, 512),
+                                          nn.ReLU(inplace=True))
 
         self.eye_position_transform = nn.Sequential(nn.Linear(2, 256),
                                                     nn.ReLU(inplace=True))
@@ -565,12 +567,11 @@ class GazeNet(nn.Module):
                                     nn.Linear(256, 3))
 
         self.relu = nn.ReLU(inplace=False)
-        self.avgpool = nn.AvgPool2d(7, stride=1)
 
     def forward(self, face_image, eye_position):
         # face part forward
         face_feature = self.face_net(face_image)
-        face_feature = self.avgpool(face_feature).view(-1, 512)
+        face_feature = self.face_process(face_feature)
 
         # eye position transform
         eye_feature = self.eye_position_transform(eye_position)
