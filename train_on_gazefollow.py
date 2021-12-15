@@ -264,6 +264,7 @@ def train():
                                 val_depth_loss = val_depth_loss_temp if val_depth_loss > val_depth_loss_temp else val_depth_loss
 
                                 # angle
+                                val_gt_direction = val_gt_direction.cpu()
                                 all_angle_dir.append(evaluation.angle_degree(val_gt_direction, val_direction_dir))
                                 all_angle_norm.append(evaluation.angle_degree(val_gt_direction, val_direction_norm))
 
