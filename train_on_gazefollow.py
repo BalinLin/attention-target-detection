@@ -16,7 +16,6 @@ from datetime import datetime
 import shutil
 import numpy as np
 from scipy.misc import imresize
-from tensorboardX import SummaryWriter
 import warnings
 
 warnings.simplefilter(action='ignore')
@@ -80,8 +79,6 @@ def train():
     if os.path.exists(logdir):
         shutil.rmtree(logdir)
     os.makedirs(logdir)
-
-    writer = SummaryWriter(logdir)
 
     # Define device
     device = torch.device('cuda', args.device)
@@ -194,15 +191,12 @@ def train():
             step += 1
 
             if batch % args.print_every == 0:
-                print("Epoch:{:04d}\tstep:{:06d}/{:06d}\ttraining loss: (l2){:.4f} (Xent){:.4f}".format(ep, batch+1, max_steps, l2_loss, Xent_loss))
-                # Tensorboard
-                ind = np.random.choice(len(images), replace=False)
-                writer.add_scalar("Train Loss", total_loss, global_step=step)
+                print("Epoch:{:04d}\tstep:{:06d}/{:06d}\ttraining loss: (l2){:.4f} (angle){:.4f} (depth){:.4f} (Xent){:.4f}".format(ep, batch+1, max_steps, l2_loss, angle_loss, depth_loss,  Xent_loss))
 
             if (batch != 0 and batch % args.eval_every == 0) or batch+1 == max_steps:
                 print('Validation in progress ...')
                 model.train(False)
-                AUC = []; min_dist = []; avg_dist = []; min_angle = []; avg_angle = []
+                AUC = []; min_dist = []; avg_dist = []; min_angle_dir = []; min_angle_norm = []; avg_angle_dir = [] ; avg_angle_norm = []
                 with torch.no_grad():
                     # idx, (img, face, head_channel, gaze_heatmap, cont_gaze, imsize, path)
                         # img.shape -> (N, 3, 224, 224),
@@ -252,9 +246,9 @@ def train():
                             # min distance: minimum among all possible pairs of <ground truth point, predicted point>
                             pred_x, pred_y = evaluation.argmax_pts(val_gaze_heatmap_pred[b_i]) # return index of max heatmap value
                             norm_p = [pred_x/float(output_resolution), pred_y/float(output_resolution)]
-                            all_distances = []
-                            all_angle = []
-                            val_direction_cpu = val_direction[b_i, :2].cpu()
+                            all_distances = []; all_angle_dir = []; all_angle_norm = []
+                            val_direction_dir = val_direction[b_i, :2].cpu()
+                            val_direction_norm = torch.FloatTensor(norm_p) - val_eye[b_i].cpu()
                             for gt_gaze in valid_gaze:
                                 # L2 dist
                                 all_distances.append(evaluation.L2_dist(gt_gaze, norm_p))
@@ -270,32 +264,30 @@ def train():
                                 val_depth_loss = val_depth_loss_temp if val_depth_loss > val_depth_loss_temp else val_depth_loss
 
                                 # angle
-                                all_angle.append(evaluation.angle_degree(val_gt_direction.cpu(), val_direction_cpu))
+                                all_angle_dir.append(evaluation.angle_degree(val_gt_direction, val_direction_dir))
+                                all_angle_norm.append(evaluation.angle_degree(val_gt_direction, val_direction_norm))
 
                             min_dist.append(min(all_distances))
-                            min_angle.append(min(all_angle))
+                            min_angle_dir.append(min(all_angle_dir))
+                            min_angle_norm.append(min(all_angle_norm))
                             # average distance: distance between the predicted point and human average point
                             mean_gt_gaze = torch.mean(valid_gaze, 0)
                             mean_gt_direction = mean_gt_gaze - val_eye[b_i].cpu()
                             avg_dist.append(evaluation.L2_dist(mean_gt_gaze, norm_p))
-                            avg_angle.append(evaluation.angle_degree(mean_gt_direction, val_direction_cpu))
+                            avg_angle_dir.append(evaluation.angle_degree(mean_gt_direction, val_direction_dir))
+                            avg_angle_norm.append(evaluation.angle_degree(mean_gt_direction, val_direction_norm))
 
                         val_total_loss = lambda_heatmap * val_l2_loss + lambda_angle * val_angle_loss + lambda_depth * val_depth_loss #+ Xent_loss
 
-                print("\tAUC:{:.4f}\tmin dist:{:.4f}\tavg dist:{:.4f}\tmin angle:{:.4f}\tavg angle:{:.4f}".format(
-                      torch.mean(torch.tensor(AUC)),
-                      torch.mean(torch.tensor(min_dist)),
-                      torch.mean(torch.tensor(avg_dist)),
-                      torch.mean(torch.tensor(min_angle)),
-                      torch.mean(torch.tensor(avg_angle))))
-
-                # Tensorboard
-                val_ind = np.random.choice(len(val_images), replace=False)
-                writer.add_scalar('Validation AUC', torch.mean(torch.tensor(AUC)), global_step=step)
-                writer.add_scalar('Validation min dist', torch.mean(torch.tensor(min_dist)), global_step=step)
-                writer.add_scalar('Validation avg dist', torch.mean(torch.tensor(avg_dist)), global_step=step)
-                writer.add_scalar('Validation min angle', torch.mean(torch.tensor(min_angle)), global_step=step)
-                writer.add_scalar('Validation avg angle', torch.mean(torch.tensor(avg_angle)), global_step=step)
+                print("\tAUC:{:.4f}\tmin dist:{:.4f}\tavg dist:{:.4f}".format(
+                    torch.mean(torch.tensor(AUC)),
+                    torch.mean(torch.tensor(min_dist)),
+                    torch.mean(torch.tensor(avg_dist))))
+                print("\tmin angle dir:{:.4f}\tmin angle norm:{:.4f}\tavg angle dir:{:.4f}\tavg angle norm:{:.4f}".format(
+                    torch.mean(torch.tensor(min_angle_dir)),
+                    torch.mean(torch.tensor(min_angle_norm)),
+                    torch.mean(torch.tensor(avg_angle_dir)),
+                    torch.mean(torch.tensor(avg_angle_norm))))
 
                 if batch+1 == max_steps:
                     # wandb loss
@@ -316,8 +308,10 @@ def train():
                             "Validation AUC": torch.mean(torch.tensor(AUC)),
                             "Validation min dist": torch.mean(torch.tensor(min_dist)),
                             "Validation avg dist": torch.mean(torch.tensor(avg_dist)),
-                            "Validation min angle": torch.mean(torch.tensor(min_angle)),
-                            "Validation avg angle": torch.mean(torch.tensor(avg_angle))},
+                            "Validation min angle direction": torch.mean(torch.tensor(min_angle_dir)),
+                            "Validation min angle norm": torch.mean(torch.tensor(min_angle_norm)),
+                            "Validation avg angle direction": torch.mean(torch.tensor(avg_angle_dir)),
+                            "Validation avg angle norm": torch.mean(torch.tensor(avg_angle_norm))},
                             step=(ep+1))
 
                     # wandb learning rate
