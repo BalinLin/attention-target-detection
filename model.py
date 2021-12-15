@@ -214,7 +214,7 @@ class ModelSpatial(nn.Module):
         return nn.Sequential(*layers)
 
 
-    def forward(self, images, depth, head, face, face_depth, gaze_field, device):
+    def forward(self, images, depth, head, face, face_depth, gaze_field, eye, device):
         ### images -> whole image(Scene Image), head -> position image(Head Position), face -> head image(Cropped Head)
         # images.shape -> torch.Size([batch_size, 3, 224, 224]),
         # depth.shape -> torch.Size([batch_size, 1, 224, 224]),
@@ -225,7 +225,7 @@ class ModelSpatial(nn.Module):
         # eye.shape -> torch.Size([batch_size, 2])
         # gaze.shape -> torch.Size([batch_size, 2])
 
-        direction = self.gaze(face, device) # (N, 3, 224, 224) -> (N, 3)
+        direction = self.gaze(face, eye, device) # (N, 3, 224, 224) -> (N, 3)
 
         # infer gaze direction and normalized
         norm = torch.norm(direction[:, :2], 2, dim=1)
@@ -639,22 +639,27 @@ class GazeTR(nn.Module):
 
         self.cls_token = nn.Parameter(torch.randn(1, 1, maps))
 
-        self.pos_embedding = nn.Embedding(dim_feature+1, maps)
+        self.eye_position_transform = nn.Sequential(nn.Linear(2, 32),
+                                                    nn.ReLU(inplace=True))
+
+        self.pos_embedding = nn.Embedding(dim_feature+2, maps)
 
         self.feed = nn.Linear(maps, 3)
 
         self.loss_op = nn.L1Loss()
 
-    def forward(self, x_in, device):
+    def forward(self, x_in, eye, device):
         feature = self.base_model(x_in) # (N, 32, 7, 7)
         batch_size = feature.size(0)
         feature = feature.flatten(2)
         feature = feature.permute(2, 0, 1)
 
         cls = self.cls_token.repeat( (1, batch_size, 1))
-        feature = torch.cat([cls, feature], 0)
+        eye_feature = self.eye_position_transform(eye)
+        eye_feature = eye_feature.unsqueeze(0)
+        feature = torch.cat([cls, eye_feature, feature], 0)
 
-        position = torch.from_numpy(np.arange(0, 50)).to(device)
+        position = torch.from_numpy(np.arange(0, 51)).to(device)
 
         pos_feature = self.pos_embedding(position)
 

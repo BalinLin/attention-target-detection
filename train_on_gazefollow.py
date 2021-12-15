@@ -117,7 +117,7 @@ def train():
     # scheduler_plateau = lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.8, patience=5, min_lr=1e-7, verbose=False)
 
     step = 0
-    loss_amp_factor_mse = 1000 # multiplied to the loss to prevent underflow
+    loss_amp_factor_mse = 10000 # multiplied to the loss to prevent underflow
     loss_amp_factor_inout = 100 # multiplied to the loss to prevent underflow
     loss_amp_factor_angle = 100 # multiplied to the loss to prevent underflow
     loss_amp_factor_depth = 100 # multiplied to the loss to prevent underflow
@@ -159,7 +159,7 @@ def train():
             relative_depth = relative_depth.to(device)
 
             # predict heatmap(N, 1, 64, 64), mean of attention, in/out
-            gaze_heatmap_pred, attmap, inout_pred, direction, gaze_field_map = model(images, depth, head, faces, face_depth, gaze_field, device)
+            gaze_heatmap_pred, attmap, inout_pred, direction, gaze_field_map = model(images, depth, head, faces, face_depth, gaze_field, eye, device)
             gaze_heatmap_pred = gaze_heatmap_pred.squeeze(1)
 
             # Loss
@@ -225,7 +225,7 @@ def train():
                         val_eye = val_eye.to(device)
 
                         # predict heatmap(N, 1, 64, 64), mean of attention, in/out
-                        val_gaze_heatmap_pred, val_attmap, val_inout_pred, val_direction, val_gaze_field_map = model(val_images, val_depth, val_head, val_faces, val_face_depth, val_gaze_field, device)
+                        val_gaze_heatmap_pred, val_attmap, val_inout_pred, val_direction, val_gaze_field_map = model(val_images, val_depth, val_head, val_faces, val_face_depth, val_gaze_field, val_eye, device)
                         val_gaze_heatmap_pred = val_gaze_heatmap_pred.squeeze(1) # (N, 1, 64, 64) -> (N, 64, 64)
                         # Loss
                             # l2 loss computed only for inside case, test set only have inside case.
