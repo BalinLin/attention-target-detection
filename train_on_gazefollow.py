@@ -299,10 +299,11 @@ def train():
                     wandb.log({"img": [wandb.Image(images, caption="images"),
                                         wandb.Image(depth, caption="depth"),
                                         wandb.Image(faces, caption="faces"),
+                                        wandb.Image(face_depth, caption="faces depth"),
                                         wandb.Image(head, caption="head"),
                                         wandb.Image(t(gaze_heatmap.unsqueeze(1)), caption="gaze_heatmap"),
                                         wandb.Image(t(gaze_heatmap_pred.unsqueeze(1)), caption="gaze_heatmap_pred"),
-                                        wandb.Image(gaze_field_map, caption="gaze_heatmap_pred")]},
+                                        wandb.Image(gaze_field_map, caption="gaze_field_map")]},
                                         step=(ep+1))
                     # wandb val
                     wandb.log({"Validation Loss": val_total_loss,

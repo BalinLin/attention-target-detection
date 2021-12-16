@@ -373,7 +373,7 @@ class VideoAttTarget_video(Dataset):
             sampled_ind = 0
 
 
-        images, depths, faces, face_depths, head_channels, heatmaps, gaze_fields, paths, gazes, imsizes, gaze_inouts = [], [], [], [], [], [], [], [], [], [], []
+        images, depths, faces, face_depths, head_channels, heatmaps, gaze_fields, paths, gazes, eyes, imsizes, gaze_inouts = [], [], [], [], [], [], [], [], [], [], [], []
         index_tracker = -1
         for i, row in df.iterrows():
             index_tracker = index_tracker+1
@@ -514,6 +514,7 @@ class VideoAttTarget_video(Dataset):
             head_channels.append(head_channel)
             heatmaps.append(gaze_map)
             gaze_fields.append(torch.from_numpy(gaze_field))
+            eyes.append(torch.FloatTensor(eye))
             gaze_inouts.append(torch.FloatTensor([int(gaze_inside)]))
 
         if self.imshow:
@@ -534,6 +535,7 @@ class VideoAttTarget_video(Dataset):
         head_channels = torch.stack(head_channels)
         heatmaps = torch.stack(heatmaps)
         gaze_fields = torch.stack(gaze_fields)
+        eyes = torch.stack(eyes)
         gazes = torch.stack(gazes)
         gaze_inouts = torch.stack(gaze_inouts)
         # imsizes = torch.stack(imsizes)
@@ -541,9 +543,9 @@ class VideoAttTarget_video(Dataset):
         # print(faces.shape, images.shape, head_channels.shape, heatmaps.shape)
 
         if self.test:
-            return images, depths, faces, face_depths, head_channels, heatmaps, gaze_fields, gazes, gaze_inouts
+            return images, depths, faces, face_depths, head_channels, heatmaps, gaze_fields, eyes, gazes, gaze_inouts
         else: # train
-            return images, depths, faces, face_depths, head_channels, heatmaps, gaze_fields, gaze_inouts
+            return images, depths, faces, face_depths, head_channels, heatmaps, gaze_fields, eyes, gaze_inouts
 
     def __len__(self):
         return self.length
