@@ -248,6 +248,34 @@ class ModelSpatial(nn.Module):
         # images = torch.cat([images, gaze_field_map_gamma], dim=1) # (N, 3, 224, 224) + (N, 1, 224, 224) -> (N, 4, 224, 224)
         images = torch.cat([images, gaze_field_map, gaze_field_map_2, gaze_field_map_3], dim=1) # (N, 3, 224, 224) + (N, 3, 224, 224) -> (N, 6, 224, 224)
 
+        offset = 0.1
+        for idx in range(batch_size):
+            d = direction[idx, 2].detach().clone()
+            if d >= 0:
+                front = depth[idx]
+                mask = front > -offset
+                front[mask] += (offset - d)
+                front = torch.clamp(front, min=0)
+                depth[idx] = front
+
+                face_front = face_depth[idx]
+                face_mask = face_front > -offset
+                face_front[face_mask] += (offset - d)
+                face_front = torch.clamp(face_front, min=0)
+                face_depth[idx] = face_front
+            else:
+                back = depth[idx]
+                mask = back < offset
+                back[mask] -= (offset + d)
+                back = torch.clamp(back, max=0)
+                depth[idx] = back
+
+                face_back = face_depth[idx]
+                face_mask = face_back < offset
+                face_back[face_mask] -= (offset + d)
+                face_back = torch.clamp(face_back, max=0)
+                face_depth[idx] = face_back
+
         # face_depth = face_depth * direction[:, 2].view([batch_size, -1, 1, 1])
         face = torch.cat((face, face_depth), dim=1) # (N, 3, 224, 224) + (N, 1, 224, 224) -> (N, 4, 224, 224)
         face = self.conv1_face(face)       # (N, 4, 224, 224) -> (N, 64, 112, 112)
@@ -277,21 +305,6 @@ class ModelSpatial(nn.Module):
         # im = torch.cat((images, depth * gaze_field_map, depth * gaze_field_map_2, depth * gaze_field_map_3), dim=1)
         # depth = depth * direction[:, 2].view([batch_size, -1, 1, 1])
             # get front, mid and back depth map by value
-        offset = 0.3
-        for idx in range(batch_size):
-            d = direction[idx, 2].detach().clone()
-            if d >= 0:
-                front = depth[idx]
-                mask = front > -offset
-                front[mask] += (offset - d)
-                front = torch.clamp(front, min=0)
-                depth[idx] = front
-            else:
-                back = depth[idx]
-                mask = back < offset
-                back[mask] -= (offset + d)
-                back = torch.clamp(depth[idx], max=0)
-                depth[idx] = back
 
         im = torch.cat((images, depth), dim=1)
         im = torch.cat((im, head), dim=1)
@@ -344,7 +357,7 @@ class ModelSpatial(nn.Module):
         x = self.conv4(x) # (N, 1, 64, 64) -> (N, 1, 64, 64)
 
         # x -> output heatmap, attn_weights -> mean of attention, encoding_inout -> in/out
-        return x, torch.mean(attn_weights, 1, keepdim=True), encoding_inout, direction, gaze_field_map
+        return x, torch.mean(attn_weights, 1, keepdim=True), encoding_inout, direction, gaze_field_map, depth, face_depth
 
 
 class ModelSpatioTemporal(nn.Module):

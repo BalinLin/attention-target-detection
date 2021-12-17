@@ -156,7 +156,7 @@ def train():
             relative_depth = relative_depth.to(device)
 
             # predict heatmap(N, 1, 64, 64), mean of attention, in/out
-            gaze_heatmap_pred, attmap, inout_pred, direction, gaze_field_map = model(images, depth, head, faces, face_depth, gaze_field, eye, device)
+            gaze_heatmap_pred, attmap, inout_pred, direction, gaze_field_map, minus_depth, minus_face_depth = model(images, depth, head, faces, face_depth, gaze_field, eye, device)
             gaze_heatmap_pred = gaze_heatmap_pred.squeeze(1)
 
             # Loss
@@ -219,7 +219,7 @@ def train():
                         val_eye = val_eye.to(device)
 
                         # predict heatmap(N, 1, 64, 64), mean of attention, in/out
-                        val_gaze_heatmap_pred, val_attmap, val_inout_pred, val_direction, val_gaze_field_map = model(val_images, val_depth, val_head, val_faces, val_face_depth, val_gaze_field, val_eye, device)
+                        val_gaze_heatmap_pred, val_attmap, val_inout_pred, val_direction, val_gaze_field_map, val_minus_depth, val_minus_face_depth = model(val_images, val_depth, val_head, val_faces, val_face_depth, val_gaze_field, val_eye, device)
                         val_gaze_heatmap_pred = val_gaze_heatmap_pred.squeeze(1) # (N, 1, 64, 64) -> (N, 64, 64)
                         # Loss
                             # l2 loss computed only for inside case, test set only have inside case.
@@ -298,8 +298,10 @@ def train():
                     t = transforms.Resize(input_resolution)
                     wandb.log({"img": [wandb.Image(images, caption="images"),
                                         wandb.Image(depth, caption="depth"),
+                                        wandb.Image(minus_depth, caption="minus depth"),
                                         wandb.Image(faces, caption="faces"),
                                         wandb.Image(face_depth, caption="faces depth"),
+                                        wandb.Image(minus_face_depth, caption="minus faces depth"),
                                         wandb.Image(head, caption="head"),
                                         wandb.Image(t(gaze_heatmap.unsqueeze(1)), caption="gaze_heatmap"),
                                         wandb.Image(t(gaze_heatmap_pred.unsqueeze(1)), caption="gaze_heatmap_pred"),
