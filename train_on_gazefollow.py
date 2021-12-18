@@ -27,7 +27,7 @@ parser.add_argument("--device", type=int, default=0, help="gpu id")
 parser.add_argument("--init_weights", type=str, default="", help="initial weights")
 parser.add_argument("--lr", type=float, default=1e-6, help="learning rate")
 parser.add_argument("--batch_size", type=int, default=48, help="batch size")
-parser.add_argument("--num_worker", type=int, default=12, help="batch size")
+parser.add_argument("--num_worker", type=int, default=12, help="num worker")
 parser.add_argument("--epochs", type=int, default=70, help="number of epochs")
 parser.add_argument("--print_every", type=int, default=100, help="print every ___ iterations")
 parser.add_argument("--eval_every", type=int, default=50000, help="evaluate every ___ iterations")
@@ -181,17 +181,17 @@ def train():
             angle_loss_1 = torch.mul(angle_loss_1, gaze_inside) # zero out loss when it's out-of-frame gaze case
             angle_loss_1 = torch.sum(angle_loss_1)/torch.sum(gaze_inside)
                 # Angle loss 2
-            gt_direction_2 = woflip_gaze - woflip_eye
-            angle_loss_2 = (1 - cosine_similarity(direction_2[:, :2], gt_direction_2)) * loss_amp_factor_angle
-            angle_loss_2 = torch.mul(angle_loss_2, gaze_inside) # zero out loss when it's out-of-frame gaze case
-            angle_loss_2 = torch.sum(angle_loss_2)/torch.sum(gaze_inside)
+            # gt_direction_2 = woflip_gaze - woflip_eye
+            # angle_loss_2 = (1 - cosine_similarity(direction_2[:, :2], gt_direction_2)) * loss_amp_factor_angle
+            # angle_loss_2 = torch.mul(angle_loss_2, gaze_inside) # zero out loss when it's out-of-frame gaze case
+            # angle_loss_2 = torch.sum(angle_loss_2)/torch.sum(gaze_inside)
                 # Angle equivalent
             direction_eq = torch.cat((-direction_2[:, 0:1], direction_2[:, 1:2]), dim=1)
             angle_loss_eq = (1 - cosine_similarity(direction[:, :2], direction_eq)) * loss_amp_factor_angle
             angle_loss_eq = torch.mul(angle_loss_eq, gaze_inside) # zero out loss when it's out-of-frame gaze case
             angle_loss_eq = torch.sum(angle_loss_eq)/torch.sum(gaze_inside)
                 # Angle all
-            angle_loss = (angle_loss_1 + angle_loss_2) / 2 + angle_loss_eq * 0.1
+            angle_loss = angle_loss_1 + angle_loss_eq * 0.1
                 # depth loss
             depth_loss = L1_loss(direction[:, 2], relative_depth) * loss_amp_factor_depth
             depth_loss = torch.mul(depth_loss, gaze_inside) # zero out loss when it's out-of-frame gaze case

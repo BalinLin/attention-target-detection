@@ -248,7 +248,7 @@ class ModelSpatial(nn.Module):
         # images = torch.cat([images, gaze_field_map_gamma], dim=1) # (N, 3, 224, 224) + (N, 1, 224, 224) -> (N, 4, 224, 224)
         images = torch.cat([images, gaze_field_map, gaze_field_map_2, gaze_field_map_3], dim=1) # (N, 3, 224, 224) + (N, 3, 224, 224) -> (N, 6, 224, 224)
 
-        offset = 0.1
+        offset = 0.3
         for idx in range(batch_size):
             d = direction[idx, 2].detach().clone()
             if d >= 0:
