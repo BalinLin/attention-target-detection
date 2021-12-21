@@ -253,26 +253,22 @@ class ModelSpatial(nn.Module):
             d = direction[idx, 2].detach().clone()
             if d >= 0:
                 front = depth[idx]
-                mask = front > -offset
-                front[mask] += (offset - d)
+                front += (offset - d)
                 front = torch.clamp(front, min=0)
                 depth[idx] = front
 
                 face_front = face_depth[idx]
-                face_mask = face_front > -offset
-                face_front[face_mask] += (offset - d)
+                face_front += (offset - d)
                 face_front = torch.clamp(face_front, min=0)
                 face_depth[idx] = face_front
             else:
                 back = depth[idx]
-                mask = back < offset
-                back[mask] -= (offset + d)
+                back -= (offset + d)
                 back = torch.clamp(back, max=0)
                 depth[idx] = back
 
                 face_back = face_depth[idx]
-                face_mask = face_back < offset
-                face_back[face_mask] -= (offset + d)
+                face_back -= (offset + d)
                 face_back = torch.clamp(face_back, max=0)
                 face_depth[idx] = face_back
 
@@ -357,7 +353,7 @@ class ModelSpatial(nn.Module):
         x = self.conv4(x) # (N, 1, 64, 64) -> (N, 1, 64, 64)
 
         # x -> output heatmap, attn_weights -> mean of attention, encoding_inout -> in/out
-        return x, torch.mean(attn_weights, 1, keepdim=True), encoding_inout, direction, gaze_field_map, depth, face_depth
+        return x, torch.mean(attn_weights, 1, keepdim=True), encoding_inout, direction
 
 
 class ModelSpatioTemporal(nn.Module):

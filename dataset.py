@@ -71,9 +71,6 @@ class GazeFollow(Dataset):
         self.transform = transform
         self.test = test
 
-        self.rebasing_size = 3
-        self.rebasing_range = [i - self.rebasing_size // 2 for i in range(self.rebasing_size)]
-
         self.input_size = input_size
         self.output_size = output_size
         self.imshow = imshow
@@ -120,17 +117,6 @@ class GazeFollow(Dataset):
         # get gaze depth for rebasing depth
         depth_gaze_x, depth_gaze_y = int(gaze_x * width), int(gaze_y * height)
         relative_depth = depth.getpixel((depth_gaze_x, depth_gaze_y)) / 256
-
-        # Rebasing offset
-        face_depth_x, face_depth_y = int(x_min + (x_max - x_min) / 2), int(y_min + (y_max - y_min) / 2)
-        head_depth = 0
-
-        for i in self.rebasing_range:
-            for j in self.rebasing_range:
-                head_depth += depth.getpixel((face_depth_x + i, face_depth_y + j)) / 256
-
-        head_depth = head_depth / (self.rebasing_size ** 2)
-        relative_depth -= head_depth
 
         if self.imshow:
             img.save("origin_img.jpg")
@@ -222,8 +208,16 @@ class GazeFollow(Dataset):
                                                     resolution=self.input_size, coordconv=False).unsqueeze(0)
 
         # Crop the face
-        face = img.crop((int(x_min), int(y_min), int(x_max), int(y_max)))
-        face_depth = depth.crop((int(x_min), int(y_min), int(x_max), int(y_max)))
+        face = img.copy().crop((int(x_min), int(y_min), int(x_max), int(y_max)))
+        face_depth = depth.copy().crop((int(x_min), int(y_min), int(x_max), int(y_max)))
+
+        # Rebasing offset
+        head_depth_arr = np.asarray(face_depth)
+        pixel_num = int(x_max - x_min) * int(y_max - y_min)
+        head_depth = head_depth_arr.sum()
+        head_depth = head_depth / pixel_num / 256 if isinstance(head_depth, np.integer) else 0
+
+        relative_depth -= head_depth
 
         if self.imshow:
             img.save("img_aug.jpg")
@@ -489,7 +483,7 @@ class VideoAttTarget_video(Dataset):
             head_depth_arr = np.asarray(face_depth)
             pixel_num = int(face_x2 - face_x1) * int(face_y2 - face_y1)
             head_depth = head_depth_arr.sum()
-            head_depth = head_depth /  pixel_num / 256  if isinstance(head_depth, np.integer) else 0
+            head_depth = head_depth / pixel_num / 256 if isinstance(head_depth, np.integer) else 0
 
             # generate gaze field for fov
             eye = [(face_x2 + face_x1) / 2 / width, (face_y2 + face_y1) / 2 / height]
