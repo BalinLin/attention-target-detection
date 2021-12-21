@@ -353,7 +353,7 @@ class ModelSpatial(nn.Module):
         x = self.conv4(x) # (N, 1, 64, 64) -> (N, 1, 64, 64)
 
         # x -> output heatmap, attn_weights -> mean of attention, encoding_inout -> in/out
-        return x, torch.mean(attn_weights, 1, keepdim=True), encoding_inout, direction
+        return x, torch.mean(attn_weights, 1, keepdim=True), encoding_inout, direction, gaze_field_map
 
 
 class ModelSpatioTemporal(nn.Module):
