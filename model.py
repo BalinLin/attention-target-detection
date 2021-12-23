@@ -253,24 +253,28 @@ class ModelSpatial(nn.Module):
             d = direction[idx, 2].detach().clone()
             if d >= 0:
                 front = depth[idx]
-                front += (offset - d)
+                mask = front > -offset
+                front[mask] += (offset - d)
                 front = torch.clamp(front, min=0)
                 depth[idx] = front
 
-                face_front = face_depth[idx]
-                face_front += (offset - d)
-                face_front = torch.clamp(face_front, min=0)
-                face_depth[idx] = face_front
+                # face_front = face_depth[idx]
+                # face_mask = face_front > -offset
+                # face_front[face_mask] += (offset - d)
+                # face_front = torch.clamp(face_front, min=0)
+                # face_depth[idx] = face_front
             else:
                 back = depth[idx]
-                back -= (offset + d)
+                mask = back < offset
+                back[mask] -= (offset + d)
                 back = torch.clamp(back, max=0)
                 depth[idx] = back
 
-                face_back = face_depth[idx]
-                face_back -= (offset + d)
-                face_back = torch.clamp(face_back, max=0)
-                face_depth[idx] = face_back
+                # face_back = face_depth[idx]
+                # face_mask = face_back < offset
+                # face_back[face_mask] -= (offset + d)
+                # face_back = torch.clamp(face_back, max=0)
+                # face_depth[idx] = face_back
 
         # face_depth = face_depth * direction[:, 2].view([batch_size, -1, 1, 1])
         face = torch.cat((face, face_depth), dim=1) # (N, 3, 224, 224) + (N, 1, 224, 224) -> (N, 4, 224, 224)
