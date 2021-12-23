@@ -121,6 +121,8 @@ def train():
     lambda_heatmap = 1 # weight for heatmap loss
     lambda_angle = 1 # weight for angle loss
     lambda_depth = 1 # weight for depth loss
+    lambda_eq = 1 # weight for eq loss
+    lambda_inout = 1 # weight for inout loss
 
     max_steps = len(train_loader)
     optimizer.zero_grad()
@@ -188,7 +190,7 @@ def train():
             angle_loss_eq = torch.mul(angle_loss_eq, gaze_inside) # zero out loss when it's out-of-frame gaze case
             angle_loss_eq = torch.sum(angle_loss_eq)/torch.sum(gaze_inside)
                 # Angle all
-            angle_loss = angle_loss_1 + angle_loss_eq * 0.1
+            angle_loss = angle_loss_1 + angle_loss_eq * lambda_eq
                 # depth loss 1
             depth_loss_1 = L1_loss(direction[:, 2], relative_depth) * loss_amp_factor_depth
             depth_loss_1 = torch.mul(depth_loss_1, gaze_inside) # zero out loss when it's out-of-frame gaze case
@@ -198,9 +200,9 @@ def train():
             depth_loss_eq = torch.mul(depth_loss_eq, gaze_inside) # zero out loss when it's out-of-frame gaze case
             depth_loss_eq = torch.sum(depth_loss_eq)/torch.sum(gaze_inside)
                 # depth all
-            depth_loss = depth_loss_1 + depth_loss_eq * 0.1
+            depth_loss = depth_loss_1 + depth_loss_eq * lambda_eq
 
-            total_loss = lambda_heatmap * l2_loss + lambda_angle * angle_loss + lambda_depth * depth_loss #+ Xent_loss
+            total_loss = lambda_heatmap * l2_loss + lambda_angle * angle_loss + lambda_depth * depth_loss #+ lambda_inout * Xent_loss
 
             # NOTE: summed loss is used to train the main model.
             #       l2_loss is used to get SOTA on GazeFollow benchmark.
@@ -299,7 +301,7 @@ def train():
                             avg_angle_dir.append(evaluation.angle_degree(mean_gt_direction, val_direction_dir))
                             avg_angle_norm.append(evaluation.angle_degree(mean_gt_direction, val_direction_norm))
 
-                        val_total_loss = lambda_heatmap * val_l2_loss + lambda_angle * val_angle_loss + lambda_depth * val_depth_loss #+ Xent_loss
+                        val_total_loss = lambda_heatmap * val_l2_loss + lambda_angle * val_angle_loss + lambda_depth * val_depth_loss #+ lambda_inout * Xent_loss
 
                 print("\tAUC:{:.4f}\tmin dist:{:.4f}\tavg dist:{:.4f}".format(
                     torch.mean(torch.tensor(AUC)),
