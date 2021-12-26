@@ -98,11 +98,8 @@ def train():
     # MSE(https://blog.csdn.net/hao5335156/article/details/81029791)
     mse_loss = nn.MSELoss(reduce=False) # not reducing in order to ignore outside cases
     L1_loss = nn.L1Loss(reduce=False, reduction='mean') # not reducing in order to ignore outside cases
-    L1_loss_eq = nn.L1Loss(reduce=False, reduction='mean') # not reducing in order to ignore outside cases
     bcelogit_loss = nn.BCEWithLogitsLoss()
     cosine_similarity = nn.CosineSimilarity()
-    cosine_similarity_flipped = nn.CosineSimilarity()
-    cosine_similarity_eq = nn.CosineSimilarity()
 
     # Optimizer
     optimizer = torch.optim.AdamW(params=model.parameters(), lr=args.lr, betas=(0.9, 0.999), weight_decay=0.01)
@@ -121,7 +118,7 @@ def train():
     lambda_heatmap = 1 # weight for heatmap loss
     lambda_angle = 1 # weight for angle loss
     lambda_depth = 1 # weight for depth loss
-    lambda_eq = 1 # weight for eq loss
+    lambda_eq = 0.1 # weight for eq loss
     lambda_inout = 1 # weight for inout loss
 
     max_steps = len(train_loader)
@@ -180,27 +177,17 @@ def train():
             angle_loss_1 = (1 - cosine_similarity(direction[:, :2], gt_direction)) * loss_amp_factor_angle
             angle_loss_1 = torch.mul(angle_loss_1, gaze_inside) # zero out loss when it's out-of-frame gaze case
             angle_loss_1 = torch.sum(angle_loss_1)/torch.sum(gaze_inside)
-                # Angle loss 2
-            # angle_loss_2 = (1 - cosine_similarity_flipped(direction_2[:, :2], gt_direction_2)) * loss_amp_factor_angle
-            # angle_loss_2 = torch.mul(angle_loss_2, gaze_inside) # zero out loss when it's out-of-frame gaze case
-            # angle_loss_2 = torch.sum(angle_loss_2)/torch.sum(gaze_inside)
                 # Angle equivalent
             direction_eq = torch.cat((-direction_2[:, 0:1], direction_2[:, 1:2]), dim=1)
-            angle_loss_eq = (1 - cosine_similarity_eq(direction[:, :2], direction_eq)) * loss_amp_factor_angle
+            angle_loss_eq = (1 - cosine_similarity(direction[:, :2], direction_eq)) * loss_amp_factor_angle
             angle_loss_eq = torch.mul(angle_loss_eq, gaze_inside) # zero out loss when it's out-of-frame gaze case
             angle_loss_eq = torch.sum(angle_loss_eq)/torch.sum(gaze_inside)
                 # Angle all
             angle_loss = angle_loss_1 + angle_loss_eq * lambda_eq
-                # depth loss 1
-            depth_loss_1 = L1_loss(direction[:, 2], relative_depth) * loss_amp_factor_depth
-            depth_loss_1 = torch.mul(depth_loss_1, gaze_inside) # zero out loss when it's out-of-frame gaze case
-            depth_loss_1 = torch.sum(depth_loss_1)/torch.sum(gaze_inside)
-                # depth loss 1
-            depth_loss_eq = L1_loss_eq(direction_2[:, 2], relative_depth) * loss_amp_factor_depth
-            depth_loss_eq = torch.mul(depth_loss_eq, gaze_inside) # zero out loss when it's out-of-frame gaze case
-            depth_loss_eq = torch.sum(depth_loss_eq)/torch.sum(gaze_inside)
-                # depth all
-            depth_loss = depth_loss_1 + depth_loss_eq * lambda_eq
+                # depth loss
+            depth_loss = L1_loss(direction[:, 2], relative_depth) * loss_amp_factor_depth
+            depth_loss = torch.mul(depth_loss, gaze_inside) # zero out loss when it's out-of-frame gaze case
+            depth_loss = torch.sum(depth_loss)/torch.sum(gaze_inside)
 
             total_loss = lambda_heatmap * l2_loss + lambda_angle * angle_loss + lambda_depth * depth_loss #+ lambda_inout * Xent_loss
 
